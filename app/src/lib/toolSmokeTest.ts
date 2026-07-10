@@ -80,6 +80,7 @@ export async function repairGeneratedToolAfterSmokeFailure(
     system: '你只负责修复 Python 工具代码，只输出 JSON。',
     text: buildRepairPrompt({ action, smoke }),
     signal,
+    scene: 'tool-smoke',
   });
 
   const parsed = JSON.parse(cleanJsonFence(reply)) as Record<string, unknown>;

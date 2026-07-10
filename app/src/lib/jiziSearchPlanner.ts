@@ -80,6 +80,7 @@ export async function planJiziSearchWithLLM(
     system: '你只负责判断本轮是否需要联网搜索，只输出 JSON。',
     text: buildSearchPrompt(text, history),
     signal,
+    scene: 'search-plan',
   });
 
   try {

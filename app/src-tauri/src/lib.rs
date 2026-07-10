@@ -152,6 +152,8 @@ pub fn run() {
       storage::delete_output_report,
       storage::list_jizi_skill_files,
       storage::save_jizi_skill_file,
+      storage::overwrite_jizi_skill_file,
+      storage::read_text_file,
       python_manager::python_status,
       python_manager::python_restart,
       python_manager::service_token_cmd

@@ -72,6 +72,7 @@ export async function extractJiziMemoryWithLLM(
     model,
     system: '你只负责整理姬子的长期记忆，只输出 JSON。',
     text: buildMemoryPrompt({ userText, assistantText, memory }),
+    scene: 'memory-extract',
   });
   return parseMemoryDraft(reply);
 }
@@ -186,6 +187,7 @@ export async function selectRelevantJiziMemoryWithLLM(
       system: '你只负责为姬子筛选长期记忆，只输出 JSON。',
       text: prompt,
       signal,
+      scene: 'memory-select',
     });
     return parseRelevantMemoryReply(reply, candidates, limit);
   } catch {

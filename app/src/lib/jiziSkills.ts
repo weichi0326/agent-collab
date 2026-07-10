@@ -195,6 +195,27 @@ export async function saveJiziSkill(input: {
   await invoke('save_jizi_skill_file', input);
 }
 
+// 覆盖已有 skill:同名直接写入,替换旧内容。用于导入时用户选择"覆盖"。
+export async function overwriteJiziSkill(input: {
+  id: string;
+  displayTitle: string;
+  displayDescription: string;
+  modelName: string;
+  modelDescription: string;
+  capabilities: string[];
+  instructions: string;
+}): Promise<void> {
+  if (!isTauri()) {
+    throw new Error('覆盖 skill 需要在桌面应用中使用');
+  }
+  await invoke('overwrite_jizi_skill_file', input);
+}
+
+// 判断是否为内置 skill(5 个):内置 skill 的 path 为空字符串。
+export function isBuiltinSkill(skill: Pick<JiziSkill, 'path'> | undefined): boolean {
+  return !skill?.path;
+}
+
 function buildSelectionPrompt(userText: string, skills: JiziSkill[]): string {
   const catalog = skills
     .map(
@@ -280,6 +301,7 @@ export async function selectJiziSkills(
     system: '你只负责选择 skill，只输出 JSON。',
     text: buildSelectionPrompt(normalized, enabledSkills),
     signal,
+    scene: 'skill-select',
   });
 
   try {

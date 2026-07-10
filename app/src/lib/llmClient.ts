@@ -6,7 +6,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import type { ProviderApi } from './providers';
 import { createTimeoutSignal } from './abortUtils'; // M1：消除重复超时信号逻辑
 import { ensureCompatiblePythonService, executeTool, unwrapToolResult } from './pythonClient';
-import { useTokenStatsStore } from '../stores/tokenStatsStore';
+import { useTokenStatsStore, type JiziScene } from '../stores/tokenStatsStore';
 
 const httpFetch: typeof fetch = isTauri() ? (tauriFetch as typeof fetch) : fetch;
 
@@ -129,6 +129,7 @@ export interface ChatParams {
   images?: ChatImage[];
   history?: ChatTurn[]; // 之前的对话轮次(不含当前这轮)
   signal?: AbortSignal; // 供取消
+  scene: JiziScene; // 姬子调用场景,用于 token 按场景统计(必填)
 }
 
 const MAX_TOKENS = 4096; // anthropic 必填,openai/gemini 忽略
@@ -136,7 +137,7 @@ const MAX_TOKENS = 4096; // anthropic 必填,openai/gemini 忽略
 // 单轮对话(非流式)。三协议统一入口:anthropic 走 /messages;openai/gemini 兼容端点走 /chat/completions。
 // 图片走各协议的多模态 content 块。取消由外部 signal 驱动。
 export async function chat(params: ChatParams): Promise<string> {
-  const { cfg, model, system, text, images = [], history = [], signal } = params;
+  const { cfg, model, system, text, images = [], history = [], signal, scene } = params;
   const base = trimBase(cfg.baseURL);
   if (!base) throw new Error('缺少 baseURL');
   if (!cfg.apiKey) throw new Error('缺少密钥');
@@ -192,7 +193,7 @@ export async function chat(params: ChatParams): Promise<string> {
         .map((b) => b.text ?? '')
         .join('');
       // Token 用量:anthropic 无 total 字段,input+output 相加。chat() 现所有调用点都是姬子侧,计入总控。
-      recordChatUsage(model, (data?.usage?.input_tokens ?? 0) + (data?.usage?.output_tokens ?? 0));
+      recordChatUsage(model, (data?.usage?.input_tokens ?? 0) + (data?.usage?.output_tokens ?? 0), scene);
       return out || '(空回复)';
     }
 
@@ -222,7 +223,7 @@ export async function chat(params: ChatParams): Promise<string> {
     const out = data?.choices?.[0]?.message?.content;
     if (typeof out !== 'string') throw new Error('返回格式无法解析');
     // Token 用量:openai 兼容端点取 usage.total_tokens。
-    recordChatUsage(model, data?.usage?.total_tokens ?? 0);
+    recordChatUsage(model, data?.usage?.total_tokens ?? 0, scene);
     return out;
   } finally {
     done();
@@ -231,9 +232,9 @@ export async function chat(params: ChatParams): Promise<string> {
 
 // chat() 是姬子(总控)侧唯一 LLM 入口(masterPlanner/orchestratorStore/toolGenerator 三处调用),
 // 故在此统一记录 token 到总控维度。若未来出现非姬子场景调用 chat(),需在此另行分流。
-function recordChatUsage(model: string, total: unknown): void {
+function recordChatUsage(model: string, total: unknown, scene: JiziScene): void {
   const n = typeof total === 'number' ? total : 0;
-  if (n > 0) useTokenStatsStore.getState().recordMaster(model, n);
+  if (n > 0) useTokenStatsStore.getState().recordMaster(model, n, scene);
 }
 
 // L16 修复：边界值改为 <=，延迟恰好 1000ms 归入低延迟档

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { App, Button, Empty, Input, Modal, Segmented, Switch, Tag } from 'antd';
 import { loadJiziSkills, saveJiziSkill, type JiziSkill } from '../../lib/jiziSkills';
 import { useJiziSkillSettingsStore } from '../../stores/jiziSkillStore';
+import { ImportSkillModal } from './ImportSkillModal';
 
 interface SkillManagerModalProps {
   open: boolean;
@@ -112,6 +113,7 @@ export function SkillManagerModal({ open, onClose }: SkillManagerModalProps) {
   const [skills, setSkills] = useState<JiziSkill[]>([]);
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string>('all');
@@ -209,9 +211,14 @@ export function SkillManagerModal({ open, onClose }: SkillManagerModalProps) {
         <div className="jizi-skill-modal__hint">
           这里控制姬子可以调用哪些 Skill。开启后，姬子会让模型自己判断何时需要它；关闭后，本轮自动选择会跳过它。
         </div>
-        <Button size="small" type="primary" onClick={() => setCreateOpen(true)}>
-          新建 skill
-        </Button>
+        <div className="jizi-skill-modal__actions">
+          <Button size="small" onClick={() => setImportOpen(true)}>
+            导入 skill
+          </Button>
+          <Button size="small" type="primary" onClick={() => setCreateOpen(true)}>
+            新建 skill
+          </Button>
+        </div>
       </div>
       <div className="jizi-skill-store-tools">
         <Input.Search
@@ -400,6 +407,12 @@ export function SkillManagerModal({ open, onClose }: SkillManagerModalProps) {
           </div>
         </div>
       </Modal>
+      <ImportSkillModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        skills={skills}
+        onImported={refreshSkills}
+      />
     </Modal>
   );
 }

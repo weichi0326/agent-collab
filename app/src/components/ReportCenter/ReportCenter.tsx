@@ -154,14 +154,15 @@ export default function ReportCenter({ refreshToken }: ReportCenterProps) {
   const byNode = useTokenStatsStore((s) => s.byNode);
   const masterTotal = useTokenStatsStore((s) => s.masterTotal);
   const grandTotal = useTokenStatsStore((s) => s.grandTotal);
+  const byScene = useTokenStatsStore((s) => s.byScene);
   const canvases = useCanvasStore((s) => s.canvases);
   const savedCanvases = useCanvasStore((s) => s.savedCanvases);
   const tokenMetrics = useMemo(() => {
     const existing = new Set<string>();
     for (const c of canvases) for (const n of c.nodes) existing.add(n.id);
     for (const c of savedCanvases) for (const n of c.nodes) existing.add(n.id);
-    return buildTokenMetrics({ byModel, byNode, masterTotal, grandTotal }, existing);
-  }, [byModel, byNode, masterTotal, grandTotal, canvases, savedCanvases]);
+    return buildTokenMetrics({ byModel, byNode, masterTotal, grandTotal, byScene }, existing);
+  }, [byModel, byNode, masterTotal, grandTotal, byScene, canvases, savedCanvases]);
   const resetTokenStats = useTokenStatsStore((s) => s.reset);
 
   const openPath = async (path?: string) => {
@@ -465,6 +466,17 @@ export default function ReportCenter({ refreshToken }: ReportCenterProps) {
                 </div>
               )}
             </div>
+            {tokenMetrics.byScene.length > 0 && (
+              <div className="report-token-block">
+                <div className="report-token-block__title">姬子按场景</div>
+                {tokenMetrics.byScene.map((row) => (
+                  <div key={row.scene} className="report-token-row">
+                    <span title={row.label}>{row.label}</span>
+                    <strong>{formatTokens(row.total)}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </section>

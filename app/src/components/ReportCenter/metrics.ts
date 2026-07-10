@@ -50,12 +50,18 @@ export interface TokenNodeRow {
   label: string;
   total: number;
 }
+export interface TokenSceneRow {
+  scene: string;
+  label: string;
+  total: number;
+}
 export interface TokenMetrics {
   grandTotal: number;
   masterTotal: number;
   byModel: TokenModelRow[]; // 按 total 降序
   activeNodes: TokenNodeRow[]; // 当前仍存在的节点,按 total 降序
   deletedTotal: number; // 已删除节点的 token 汇总(不在任何画布里)
+  byScene: TokenSceneRow[]; // 姬子按场景细分,按 total 降序
 }
 
 interface TokenStatsSnapshot {
@@ -63,7 +69,26 @@ interface TokenStatsSnapshot {
   byNode: Record<string, { label: string; total: number }>;
   masterTotal: number;
   grandTotal: number;
+  byScene?: Record<string, number>;
 }
+
+// 姬子各调用场景的中文展示名。
+export const JIZI_SCENE_LABELS: Record<string, string> = {
+  'import-skill': 'Skill 导入分析',
+  'skill-select': 'Skill 选择',
+  'memory-extract': '记忆抽取',
+  'memory-select': '记忆筛选',
+  'search-plan': '搜索规划',
+  'search-quality': '搜索结果筛选',
+  'turn-plan': '轮次规划',
+  'tool-generate': '工具生成',
+  'tool-smoke': '工具冒烟修复',
+  orchestrate: '故障诊断',
+  'master-reply': '姬子回复',
+  'input-rewrite': '检索词改写',
+  'session-summary': '会话压缩',
+  'session-title': '会话标题',
+};
 
 // 交叉 token 统计与「当前存在的节点 id 集合」,把 byNode 分区为 活跃节点 vs 已删除汇总。
 export function buildTokenMetrics(
@@ -80,12 +105,20 @@ export function buildTokenMetrics(
     else deletedTotal += rec.total;
   }
   activeNodes.sort((a, b) => b.total - a.total);
+  const byScene: TokenSceneRow[] = Object.entries(stats.byScene ?? {})
+    .map(([scene, total]) => ({
+      scene,
+      label: JIZI_SCENE_LABELS[scene] ?? scene,
+      total,
+    }))
+    .sort((a, b) => b.total - a.total);
   return {
     grandTotal: stats.grandTotal,
     masterTotal: stats.masterTotal,
     byModel,
     activeNodes,
     deletedTotal,
+    byScene,
   };
 }
 

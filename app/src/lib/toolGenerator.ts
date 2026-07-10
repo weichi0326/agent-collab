@@ -123,6 +123,7 @@ export async function generateToolWithLLM(
       .join('\n\n'),
     text: buildGeneratorPrompt(requirement, runtimeContext),
     signal,
+    scene: 'tool-generate',
   });
 
   let parsed: unknown;

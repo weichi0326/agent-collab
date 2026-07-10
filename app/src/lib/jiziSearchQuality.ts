@@ -66,6 +66,7 @@ export async function assessSearchResultsWithLLM(params: {
       system: '你只负责筛选搜索结果，只输出 JSON。',
       text: buildQualityPrompt(params.userText, params.query, results),
       signal: params.signal,
+      scene: 'search-quality',
     });
     return parseQualityReply(reply, results);
   } catch {

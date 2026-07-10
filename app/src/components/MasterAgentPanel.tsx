@@ -108,6 +108,7 @@ async function condenseSearchQuery(params: {
         '你是检索词改写器。结合对话上下文，把用户最新一句可能省略、含指代的话补全成一个能独立提交给搜索引擎的简洁中文检索词。只输出检索词本身，不要解释、不要加引号。若原句已能独立检索，原样输出。',
       text: `【对话上下文】\n${ctx}\n\n【用户最新输入】\n${text}\n\n改写后的检索词：`,
       signal,
+      scene: 'input-rewrite',
     });
     const q = rewritten.trim().replace(/^["'「」『』\s]+|["'「」『』\s]+$/g, '');
     return q || text;
@@ -428,6 +429,7 @@ function MasterAgentPanel() {
         model,
         system: '你是对话上下文压缩器，只负责生成简洁、准确、可延续任务的中文摘要。',
         text: buildSummaryPrompt(previousSummary, newMessages),
+        scene: 'session-summary',
       });
       updateSessionSummary(sessionId, summary, cutoff);
       message.info('已自动压缩较早对话上下文，后续对话会继续引用摘要');
@@ -451,6 +453,7 @@ function MasterAgentPanel() {
         system:
           '你是会话标题生成器。依据首轮问答,输出一个不超过 16 字、精准概括主题的中文短标题。只输出标题本身,不要引号、句号或任何多余说明。',
         text: `用户：${userText.slice(0, 500)}\n\n助手：${assistantReply.slice(0, 500)}`,
+        scene: 'session-title',
       });
       const clean = raw
         .trim()
@@ -960,6 +963,7 @@ function MasterAgentPanel() {
         images,
         history,
         signal: controller.signal,
+        scene: 'master-reply',
       });
 
       updateMessage(assistantId, {

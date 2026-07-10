@@ -403,7 +403,59 @@ pub fn save_jizi_skill_file(
     capabilities: Vec<String>,
     instructions: String,
 ) -> Result<(), String> {
-    let id = id.trim();
+    let (skill_path, content, id_label) =
+        build_jizi_skill_artifacts(id, display_title, display_description, model_name,
+                                   model_description, capabilities, instructions)?;
+    if skill_path.exists() {
+        return Err(format!("skill「{id_label}」已存在"));
+    }
+    fs::write(&skill_path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn overwrite_jizi_skill_file(
+    id: String,
+    display_title: String,
+    display_description: String,
+    model_name: String,
+    model_description: String,
+    capabilities: Vec<String>,
+    instructions: String,
+) -> Result<(), String> {
+    let (skill_path, content, _id_label) =
+        build_jizi_skill_artifacts(id, display_title, display_description, model_name,
+                                   model_description, capabilities, instructions)?;
+    fs::write(&skill_path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// 读文本文件:用于 Skill 导入时读取用户通过对话框选择的 .md 文件。
+// 路径来自原生对话框,用户主动选择,无注入风险。限 2MB 防误选大文件。
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    const MAX: usize = 2 * 1024 * 1024;
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err("文件不存在".to_string());
+    }
+    let meta = fs::metadata(p).map_err(|e| e.to_string())?;
+    if meta.len() as usize > MAX {
+        return Err("文件过大，请控制在 2MB 以内".to_string());
+    }
+    fs::read_to_string(p).map_err(|e| e.to_string())
+}
+
+fn build_jizi_skill_artifacts(
+    id: String,
+    display_title: String,
+    display_description: String,
+    model_name: String,
+    model_description: String,
+    capabilities: Vec<String>,
+    instructions: String,
+) -> Result<(std::path::PathBuf, String, String), String> {
+    let id = id.trim().to_string();
     if id.len() < 2 || id.len() > 48 {
         return Err("skill 标识长度应为 2-48 个字符".to_string());
     }
@@ -453,12 +505,9 @@ pub fn save_jizi_skill_file(
     }
 
     let skills_root = app_base_dir()?.join("jizi-agent-architecture").join("skills");
-    let skill_dir = skills_root.join(id);
+    let skill_dir = skills_root.join(&id);
     fs::create_dir_all(&skill_dir).map_err(|e| e.to_string())?;
     let skill_path = skill_dir.join("SKILL.md");
-    if skill_path.exists() {
-        return Err(format!("skill「{id}」已存在"));
-    }
     let capability_text = capabilities.join(" | ");
     let capability_markdown = markdown_list(&capabilities);
     let content = format!(
@@ -484,8 +533,7 @@ pub fn save_jizi_skill_file(
         capability_markdown = capability_markdown,
         instructions = instructions
     );
-    fs::write(&skill_path, content).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok((skill_path, content, id))
 }
 
 fn resolve(key: &str) -> Result<PathBuf, String> {

@@ -190,6 +190,7 @@ export const useOrchestratorStore = create<OrchestratorState>()(
             model: modelId,
             system: prompt.system,
             text: prompt.text,
+            scene: 'orchestrate',
           });
           const parsed = JSON.parse(cleanJsonFence(reply)) as Record<
             string,

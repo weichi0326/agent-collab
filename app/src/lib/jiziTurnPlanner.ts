@@ -292,6 +292,7 @@ export async function planJiziTurnWithLLM(
     system: '你只负责规划姬子本轮处理路线，只输出 JSON。',
     text: buildPlannerPrompt(text, history, opts),
     signal: opts.signal,
+    scene: 'turn-plan',
   });
   return parseJiziTurnDecision(reply, opts);
 }
