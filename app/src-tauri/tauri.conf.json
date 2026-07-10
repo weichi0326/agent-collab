@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "multi-agent-tool",
-  "version": "0.1.0",
+  "version": "3.0.2",
   "identifier": "com.multiagent.tool",
   "build": {
     "frontendDist": "../dist",
@@ -32,6 +32,7 @@
     "targets": ["nsis"],
     "publisher": "multi-agent-tool",
     "copyright": "Copyright © 2026 multi-agent-tool",
+    "licenseFile": "license.txt",
     "resources": {
       "python-dist": "python"
     },
@@ -45,7 +46,11 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["SimpChinese", "English"]
+        "languages": ["SimpChinese", "English"],
+        "template": "installer/installer.nsi",
+        "installerIcon": "icons/icon.ico",
+        "sidebarImage": "installer/sidebar.bmp",
+        "headerImage": "installer/header.bmp"
       }
     },
     "android": {
