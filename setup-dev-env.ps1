@@ -109,6 +109,10 @@ function EnsurePythonVenv() {
   if (-not $CheckOnly) {
     Run $VenvPython @('-m', 'pip', 'install', '--upgrade', 'pip')
     Run $VenvPython @('-m', 'pip', 'install', '-r', (Join-Path $PythonDir 'requirements.txt'))
+    $DevReq = Join-Path $PythonDir 'requirements-dev.txt'
+    if (Test-Path $DevReq) {
+      Run $VenvPython @('-m', 'pip', 'install', '-r', $DevReq)
+    }
   }
 }
 
@@ -141,4 +145,4 @@ EnsurePythonVenv
 EnsureNodeModules
 VerifyProject
 
-Say "All done. To start the desktop app, run the start-dev batch file in this folder."
+Say "All done. To start the desktop app, run 启动开发环境.bat in this folder."
