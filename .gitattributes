@@ -1,0 +1,44 @@
+# ─── 行尾规范化 ──────────────────────────────────────────────────
+# 仓库内统一按 LF 存储,检出时按平台自动转换。把规则写进仓库,
+# 不再依赖各机器的 core.autocrlf 全局设置,消除跨机器 CRLF/LF 抖动。
+* text=auto
+
+# ─── 明确文本类型(保险,避免被误判为二进制) ──────────────────────
+*.ts    text
+*.tsx   text
+*.js    text
+*.mjs   text
+*.cjs   text
+*.json  text
+*.jsonc text
+*.css   text
+*.html  text
+*.svg   text
+*.md    text
+*.py    text
+*.rs    text
+*.toml  text
+*.yml   text
+*.yaml  text
+*.txt   text
+*.ini   text
+
+# Windows 脚本必须用 CRLF,否则部分环境执行异常
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+
+# ─── 二进制文件(不做行尾转换,不做文本 diff) ─────────────────────
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
