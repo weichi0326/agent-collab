@@ -1,0 +1,22 @@
+# 多 Agent 协同工具 —— Python 服务依赖（M5 + M6）
+# 运行环境：python/venv（由环境配置器.bat 创建）
+
+# Web 服务框架
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+
+# Excel 操作（L23 修复：pandas 未被使用，已移除）
+openpyxl==3.1.5
+
+# PDF 读取
+PyMuPDF==1.26.1
+pdfplumber==0.11.6
+
+# 编码检测（L23 修复：file_read.py 使用 chardet 但此前未列入）
+chardet==5.2.0
+
+# HTTP 请求（llm-calling 工具代理 LLM API）
+requests==2.32.3
+
+# 数据验证（FastAPI 内置依赖）
+pydantic==2.11.4

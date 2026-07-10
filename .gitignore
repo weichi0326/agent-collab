@@ -1,0 +1,56 @@
+# ─── 敏感数据 / 个人运行时数据(绝不入库) ──────────────────────────
+# data/ 含 API Key(models.json) + 画布/会话/配置,全是运行时生成,不入库
+/data/
+# 运行产物 / 日志 / 姬子运行时生成的用户工具
+/outputs/
+/logs/
+# python/tools/custom/ 只保留 __init__.py,其余是用户运行时造的工具
+python/tools/custom/*
+!python/tools/custom/__init__.py
+# registry.json 记录用户装过哪些动态工具,属于个人运行时数据,不入库。
+# 留 __init__.py 让目录存在。
+
+# ─── 开发环境(社区惯例:项目内隔离,但不入 git) ────────────────────
+/python/venv/
+# Cargo.toml 锁的依赖会自动装;venv 入库会污染别人环境。
+
+# ─── 编译/构建产物(自动重建,不入库) ──────────────────────────────
+# Rust target 已在 app/src-tauri/.gitignore 覆盖
+# 前端 node_modules / dist 已在 app/.gitignore 覆盖
+/app/node_modules/
+/app/dist/
+# 发版用绿色 Python(python-build-standalone 组装,274M,发版前 node python/build-dist.mjs 重建)
+/app/src-tauri/python-dist/
+
+# ─── 编辑器/系统垃圾 ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── 临时文件 ────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.log
+
+# Python cache / test cache (local garbage, never commit)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Local-only environment/config files. Real keys are user data and must stay out of Git.
+.env
+.env.*
+*.local
+
+# Machine-specific Rust linker override. Each computer may have a different Rust path.
+/app/.cargo/config.toml

@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>使用指引 · 多 Agent 协同工具</title>
+  <style>
+    :root {
+      --brand: #1890ff;
+      --brand-deep: #096dd9;
+      --brand-soft: #e8f3ff;
+      --accent-green: #52c41a;
+      --accent-orange: #fa8c16;
+      --ink-1: #1d2129;
+      --ink-2: #4e5969;
+      --ink-3: #86909c;
+      --line: #e5e6eb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+      background: #fff;
+      color: var(--ink-1);
+      font-size: 13px;
+    }
+
+    /* 真实 app iframe 占满屏 */
+    #appFrame {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+    }
+
+    /* 引导遮罩层 */
+    .tour-layer {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* 镂空高亮框：用巨大 box-shadow 盖住其余区域 */
+    .tour-highlight {
+      position: absolute;
+      border-radius: 4px;
+      box-shadow: 0 0 0 9999px rgba(10, 15, 24, 0.62);
+      border: 2px solid var(--brand);
+      transition: all .45s cubic-bezier(.16, 1, .3, 1);
+      pointer-events: none;
+      display: none;
+    }
+    .tour-highlight.pulse {
+      animation: hl-pulse 2s ease-in-out infinite;
+    }
+    @keyframes hl-pulse {
+      0%, 100% { box-shadow: 0 0 0 9999px rgba(10, 15, 24, 0.62), 0 0 0 0 rgba(24, 144, 255, 0.5); }
+      50%      { box-shadow: 0 0 0 9999px rgba(10, 15, 24, 0.62), 0 0 0 10px rgba(24, 144, 255, 0); }
+    }
+
+    /* 浮窗 */
+    .tour-tip {
+      position: absolute;
+      width: 320px;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 12px 36px rgba(10, 15, 24, 0.22), 0 4px 10px rgba(10, 15, 24, 0.1);
+      padding: 16px 18px;
+      pointer-events: auto;
+      z-index: 10001;
+      display: none;
+      transition: all .45s cubic-bezier(.16, 1, .3, 1);
+    }
+    .tour-tip .tt-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 9px;
+      background: var(--brand-soft);
+      color: var(--brand-deep);
+      font-size: 11px; font-weight: 500;
+      border-radius: 999px;
+      margin-bottom: 8px;
+    }
+    .tour-tip .tt-tag::before {
+      content: ''; width: 5px; height: 5px;
+      border-radius: 50%; background: var(--brand);
+    }
+    .tour-tip h3 {
+      font-size: 15px; font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--ink-1);
+      line-height: 1.4;
+    }
+    .tour-tip p {
+      font-size: 12.5px;
+      color: var(--ink-2);
+      line-height: 1.65;
+    }
+    .tour-tip .tt-hint {
+      font-size: 11.5px;
+      color: var(--ink-3);
+      padding: 8px 10px;
+      background: #fafbfc;
+      border-radius: 6px;
+      margin-top: 10px;
+      line-height: 1.6;
+    }
+    .tour-tip .tt-hint b { color: var(--brand-deep); }
+    .tour-tip .tt-hint code {
+      padding: 1px 5px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 11px;
+      color: var(--brand-deep);
+    }
+    .tour-tip .tt-foot {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 14px; padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .tour-tip .tt-prog { font-size: 11px; color: var(--ink-3); }
+    .tour-tip .tt-prog b { color: var(--ink-1); font-weight: 600; }
+    .tour-tip .tt-btns { display: flex; gap: 6px; }
+    .tt-btn {
+      padding: 6px 14px; font-size: 12px;
+      border-radius: 5px; cursor: pointer;
+      font-weight: 500; border: 1px solid transparent;
+      font-family: inherit;
+    }
+    .tt-btn-ghost { color: var(--ink-2); border-color: var(--line); background: #fff; }
+    .tt-btn-ghost:not(:disabled):hover { color: var(--brand); border-color: var(--brand); }
+    .tt-btn-ghost:disabled { opacity: .4; cursor: not-allowed; }
+    .tt-btn-primary { background: var(--brand); color: #fff; }
+    .tt-btn-primary:hover { background: var(--brand-deep); }
+    .tt-btn-success { background: var(--accent-green); color: #fff; }
+    .tt-btn-success:hover { background: #389e0d; }
+
+    /* 箭头 */
+    .tt-arrow {
+      position: absolute;
+      width: 12px; height: 12px;
+      background: #fff;
+      transform: rotate(45deg);
+      border-radius: 2px;
+    }
+    .tour-tip[data-placement="bottom"] .tt-arrow {
+      top: -6px; left: var(--ax, 50%); margin-left: -6px;
+      border-top: 1px solid rgba(10,15,24,.06);
+      border-left: 1px solid rgba(10,15,24,.06);
+    }
+    .tour-tip[data-placement="top"] .tt-arrow {
+      bottom: -6px; left: var(--ax, 50%); margin-left: -6px;
+      border-bottom: 1px solid rgba(10,15,24,.06);
+      border-right: 1px solid rgba(10,15,24,.06);
+    }
+    .tour-tip[data-placement="right"] .tt-arrow {
+      left: -6px; top: var(--ay, 50%); margin-top: -6px;
+      border-left: 1px solid rgba(10,15,24,.06);
+      border-bottom: 1px solid rgba(10,15,24,.06);
+    }
+    .tour-tip[data-placement="left"] .tt-arrow {
+      right: -6px; top: var(--ay, 50%); margin-top: -6px;
+      border-right: 1px solid rgba(10,15,24,.06);
+      border-top: 1px solid rgba(10,15,24,.06);
+    }
+
+    /* 中央欢迎/完成浮窗 */
+    .tour-tip.center {
+      width: 440px;
+      padding: 28px 32px;
+      text-align: center;
+    }
+    .tour-tip.center .tt-icon {
+      width: 56px; height: 56px;
+      margin: 0 auto 14px;
+      border-radius: 16px;
+      display: grid; place-items: center;
+      color: #fff;
+    }
+    .tour-tip.center .tt-icon.welcome {
+      background: linear-gradient(135deg, #1890ff, #096dd9);
+      box-shadow: 0 8px 20px rgba(24, 144, 255, .35);
+    }
+    .tour-tip.center .tt-icon.finale {
+      background: linear-gradient(135deg, #52c41a, #389e0d);
+      box-shadow: 0 8px 20px rgba(82, 196, 26, .35);
+    }
+    .tour-tip.center .tt-icon svg { width: 28px; height: 28px; }
+    .tour-tip.center h3 { font-size: 19px; margin-bottom: 8px; }
+    .tour-tip.center p { font-size: 13px; margin-bottom: 0; }
+    .tour-tip.center .tt-warn {
+      margin: 14px 0 0;
+      padding: 10px 14px;
+      background: #fff7e6;
+      border: 1px solid #ffd591;
+      border-radius: 8px;
+      color: #ad6800;
+      font-size: 12px;
+      text-align: left;
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .tour-tip.center .tt-warn svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; }
+    .tour-tip.center .tt-tips {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+      margin: 14px 0 0; text-align: left;
+    }
+    .tour-tip.center .tt-tip {
+      padding: 10px;
+      background: #fafbfc;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 11px; color: var(--ink-2);
+    }
+    .tour-tip.center .tt-tip b {
+      color: var(--ink-1); display: block; margin-bottom: 3px; font-size: 12px;
+    }
+
+    /* 顶部进度条 */
+    .tour-bar {
+      position: fixed; top: 0; left: 0;
+      height: 3px; width: 0%;
+      background: linear-gradient(90deg, #1890ff, #722ed1);
+      z-index: 10002;
+      transition: width .45s cubic-bezier(.16, 1, .3, 1);
+      box-shadow: 0 0 8px rgba(24, 144, 255, .5);
+    }
+
+    /* 加载中蒙层 */
+    .loading-mask {
+      position: fixed; inset: 0;
+      background: rgba(255, 255, 255, .9);
+      display: grid; place-items: center;
+      z-index: 9998;
+      transition: opacity .4s;
+    }
+    .loading-mask.hide { opacity: 0; pointer-events: none; }
+    .loading-mask .lm-card {
+      text-align: center;
+      color: var(--ink-2);
+      font-size: 13px;
+    }
+    .loading-mask .lm-spin {
+      width: 32px; height: 32px;
+      border: 3px solid var(--line);
+      border-top-color: var(--brand);
+      border-radius: 50%;
+      margin: 0 auto 12px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 返回链接 */
+    .tour-back {
+      position: fixed;
+      top: 14px; right: 18px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .85);
+      background: rgba(0, 0, 0, .3);
+      padding: 5px 12px;
+      border-radius: 4px;
+      z-index: 10003;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all .15s;
+      display: none;
+    }
+    .tour-back:hover { background: rgba(0, 0, 0, .5); color: #fff; }
+    .tour-back.show { display: block; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 加载中蒙层（等 iframe 就绪） -->
+  <div class="loading-mask" id="loadingMask">
+    <div class="lm-card">
+      <div class="lm-spin"></div>
+      <div>正在加载软件界面...</div>
+    </div>
+  </div>
+
+  <!-- 真实 app iframe -->
+  <iframe id="appFrame" src="/" title="多 Agent 协同工具"></iframe>
+
+  <!-- 顶部进度条 -->
+  <div class="tour-bar" id="tourBar"></div>
+
+  <!-- 返回介绍页 -->
+  <a class="tour-back" id="tourBack" href="../../intro-site/index.html">← 返回介绍页</a>
+
+  <!-- 引导遮罩层 -->
+  <div class="tour-layer">
+    <div class="tour-highlight" id="hl"></div>
+    <div class="tour-tip" id="tip"></div>
+  </div>
+
+  <!-- 注入到 iframe 的禁用交互样式 -->
+  <template id="freezeCss">
+    /* 禁用所有交互，让克隆页只展示不响应 */
+    * {
+      pointer-events: none !important;
+      cursor: default !important;
+    }
+    /* 但允许引导层在父页操作，不影响 */
+    /* 隐藏可能的 antd 弹窗残留 */
+    .ant-modal-root, .ant-message, .ant-notification {
+      display: none !important;
+    }
+    /* 防止 antd Segmented 等组件的过渡动画 */
+    * {
+      transition: none !important;
+      animation: none !important;
+    }
+    /* 让画布节点不响应拖拽 */
+    .react-flow__node, .react-flow__edge, .react-flow__handle {
+      pointer-events: none !important;
+    }
+  </template>
+
+  <script>
+    // ====== 等待 iframe 加载并注入冻结样式 ======
+    const frame = document.getElementById('appFrame');
+    const loadingMask = document.getElementById('loadingMask');
+    const freezeTpl = document.getElementById('freezeCss');
+
+    let iframeReady = false;
+    let iframeDoc = null;
+    let iframeWin = null;
+
+    function setupIframe() {
+      try {
+        iframeDoc = frame.contentDocument;
+        iframeWin = frame.contentWindow;
+        if (!iframeDoc || !iframeDoc.body) {
+          setTimeout(setupIframe, 100);
+          return;
+        }
+        // 注入禁用交互的 CSS
+        const style = iframeDoc.createElement('style');
+        style.textContent = freezeTpl.content.textContent;
+        iframeDoc.head.appendChild(style);
+        iframeReady = true;
+        // 隐藏加载蒙层
+        loadingMask.classList.add('hide');
+        setTimeout(() => loadingMask.style.display = 'none', 400);
+        // 启动引导
+        setTimeout(startTour, 600);
+      } catch (e) {
+        console.error('iframe setup failed:', e);
+        // 跨域失败时回退提示
+        loadingMask.querySelector('.lm-card').innerHTML = `
+          <div style="color:#ff4d4f;font-size:14px;margin-bottom:8px;">无法加载软件界面</div>
+          <div style="font-size:12px;color:#86909c;">请先启动开发服务器（npm run dev），再访问本页</div>
+        `;
+      }
+    }
+
+    frame.addEventListener('load', () => {
+      // 给 React 一点时间渲染
+      setTimeout(setupIframe, 500);
+    });
+
+      // ====== 各步骤定义 ======
+      const steps = [
+        {
+          center: true,
+          icon: 'welcome',
+          iconSvg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-4"/><rect x="9" y="2" width="6" height="11" rx="2"/></svg>',
+          tag: '欢迎',
+          title: '这是多 Agent 协同工具的使用指引',
+          desc: '约 9 步，2 分钟。我会依次高亮界面上的关键区域，告诉你每个地方做什么、怎么用。下面看到的就是软件的真实界面。',
+          warn: '本引导不可跳过。请按顺序看完每一步，最后才会出现"完成"按钮。中途可点"上一步"回看，但无法向前跳跃。',
+          btn: '开始'
+        },
+        {
+          root: '.title-bar',
+          text: '设置',
+          placement: 'bottom',
+          tag: '第 1 步 · 配置 LLM',
+          title: '点「设置」打开模型配置',
+          desc: '点标题栏的「设置」按钮，下拉里有「模型配置」「搜索配置」「工具库」三个入口。先打开「模型配置」配置 LLM API Key。',
+          hint: '预置 13 家厂商（OpenAI / Anthropic / DeepSeek / Kimi 等），选一家填 Key、点「通信测试」通过即可。'
+        },
+        {
+          root: '.agent-sidebar',
+          text: '新建',
+          placement: 'right',
+          tag: '第 2 步 · 新建 Agent',
+          title: '从预置模板新建一个 Agent',
+          desc: '点左侧「新建」下拉，从 3 个预置模板（需求分析师 / 测试用例生成器 / Bug 报告生成器）里选一个落库。',
+          hint: '模板落库后可立即编辑：<b>改名、改提示词、改工具标签、选第 1 步配置的模型</b>。'
+        },
+        {
+          selector: '.agent-card',
+          nth: 1,
+          placement: 'right',
+          tag: '第 3 步 · Agent 卡片',
+          title: '这是建好的 Agent，按住拖到画布',
+          desc: 'Agent 库里的卡片可以按住拖到中间画布。拖入即「快照复制」为节点实例，与库里的定义完全解耦。',
+          hint: 'hover 卡片右侧会出现编辑/克隆/删除图标，可改提示词与工具标签。'
+        },
+        {
+          selector: '.agent-sidebar .ant-segmented',
+          placement: 'bottom',
+          tag: '第 4 步 · 切换页签',
+          title: '切到「画布」页签管理画布',
+          desc: 'Agent 库管理 Agent，画布页签管理画布。点这里切换。',
+          hint: '画布是 Agent 的编排容器，节点只能在画布上运行。'
+        },
+        {
+          selector: '.canvas-area',
+          placement: 'top',
+          tag: '第 5 步 · 画布与连线',
+          title: '在画布上拖入节点并画箭头连线',
+          desc: '从左侧 Agent 库拖节点到画布；鼠标悬停节点会出现端口，按住拖到下一个节点生成带箭头连线。',
+          hint: '连线即「上游输出 → 下游输入」的数据通道。选中连线按 <code>Delete</code> 可删除。'
+        },
+        {
+          root: '.title-bar',
+          text: '运行',
+          placement: 'bottom',
+          tag: '第 6 步 · 运行画布',
+          title: '点「运行」按依赖图自动跑',
+          desc: '会先复制一张只读运行副本，按拓扑顺序执行节点。依赖满足的节点并行（最大 4 并发），临时 LLM 失败会节点级补跑。',
+          hint: '运行中按钮变成「中止任务」，可中途停下。运行副本 tab 会同屏显示进度。'
+        },
+        {
+          selector: '.right-panel',
+          placement: 'left',
+          tag: '第 7 步 · 属性面板',
+          title: '这里看节点配置与本次输出',
+          desc: '选中画布节点后，右侧属性面板显示该节点实例的名称、输出格式、数据来源、本次产物文件。',
+          hint: '运行结束后，<b>双击产物文件名</b>可直接系统打开。'
+        },
+        {
+          root: '.title-bar',
+          text: '报告中心',
+          placement: 'bottom',
+          tag: '第 8 步 · 报告中心',
+          title: '所有历史产物都在这里',
+          desc: '点「报告中心」切换到报告视图，集中查看总运行次数、成功率、产物数、平均耗时、画布/节点表现。',
+          hint: '历史产物表格支持按画布/格式/关键词筛选，可定位文件夹、二次确认删除。'
+        },
+        {
+          selector: '.master-drawer__trigger',
+          placement: 'top',
+          tag: '第 9 步 · 姬子',
+          title: '嫌麻烦？让姬子用自然语言帮你',
+          desc: '点底部 pill 打开姬子抽屉，直接说人话，比如「建一条需求→用例→Bug 的流水线」，她会用 LLM 规划出多步动作、列表确认后执行。',
+          hint: '支持：建画布 / 加节点 / 连线 / 删节点 / 改输出格式 / 运行当前画布。规划失败有规则兜底。'
+        },
+        {
+          center: true,
+          icon: 'finale',
+          iconSvg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+          tag: '完成',
+          title: '引导结束，可以开始用了',
+          desc: '你已经认识完界面上所有关键区域。关闭本页回到软件，按指引的顺序操作即可。',
+          tips: [
+            { b: '第一次跑', t: '用预置模板建 3 个 Agent，连一条最简单的流水线试运行。' },
+            { b: '遇到问题', t: '先看标题栏「重启后台」按钮，再看报告中心的历史记录与错误信息。' },
+            { b: '想偷懒', t: '直接打开姬子抽屉，用自然语言描述需求让她帮你建画布。' }
+          ],
+          btn: '完成',
+          success: true
+        }
+      ];
+
+    // ====== 引导引擎 ======
+    const hl = document.getElementById('hl');
+    const tip = document.getElementById('tip');
+    const bar = document.getElementById('tourBar');
+    const back = document.getElementById('tourBack');
+
+    let current = -1;
+
+    // finder：支持多种查找方式
+    // - selector: CSS 选择器
+    // - text: 在 .title-bar .ant-btn 里找包含该文字的按钮
+    // - nth: 同 selector 命中多个时取第几个（1-based）
+    function findEl(step) {
+      if (!iframeDoc) return null;
+      if (step.text) {
+        // 在指定容器内找 ant-btn 含文字的
+        const root = step.root ? iframeDoc.querySelector(step.root) : iframeDoc.body;
+        if (!root) return null;
+        const btns = root.querySelectorAll('.ant-btn');
+        for (const b of btns) {
+          if (b.textContent && b.textContent.trim().includes(step.text)) {
+            // 跳过 disabled 的（比如运行按钮在 non-running 时是「运行」）
+            if (step.skipDisabled && b.disabled) continue;
+            return b;
+          }
+        }
+        return null;
+      }
+      if (step.selector) {
+        if (step.nth) {
+          const all = iframeDoc.querySelectorAll(step.selector);
+          return all[step.nth - 1] || null;
+        }
+        return iframeDoc.querySelector(step.selector);
+      }
+      return null;
+    }
+
+    function getRect(el) {
+      if (!el) return null;
+      const iframeRect = frame.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return {
+        left: r.left + iframeRect.left,
+        top: r.top + iframeRect.top,
+        width: r.width,
+        height: r.height,
+        right: r.right + iframeRect.left,
+        bottom: r.bottom + iframeRect.top
+      };
+    }
+
+    function render(idx) {
+      const step = steps[idx];
+      if (!step) return;
+
+      bar.style.width = ((idx + 1) / steps.length * 100) + '%';
+
+      // 首尾步骤不显示返回链接，中间步骤显示
+      back.classList.toggle('show', idx > 0 && idx < steps.length - 1);
+
+      if (step.center) {
+        hl.style.display = 'none';
+        const isLast = idx === steps.length - 1;
+        let body = '';
+        if (isLast && step.tips) {
+          body = `<div class="tt-tips">${step.tips.map(t => `<div class="tt-tip"><b>${t.b}</b>${t.t}</div>`).join('')}</div>`;
+        }
+        if (idx === 0 && step.warn) {
+          body = `
+            <div class="tt-warn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <div>${step.warn}</div>
+            </div>`;
+        }
+        tip.classList.add('center');
+        tip.removeAttribute('data-placement');
+        tip.innerHTML = `
+          <div class="tt-icon ${step.icon}">${step.iconSvg}</div>
+          <span class="tt-tag">${step.tag}</span>
+          <h3>${step.title}</h3>
+          <p>${step.desc}</p>
+          ${body}
+          <div class="tt-foot" style="justify-content:center;margin-top:18px;">
+            <div class="tt-btns" style="margin:0 auto;">
+              ${idx > 0 ? '<button class="tt-btn tt-btn-ghost" data-action="prev">上一步</button>' : ''}
+              <button class="tt-btn ${step.success ? 'tt-btn-success' : 'tt-btn-primary'}" data-action="next">${step.btn || '下一步'}</button>
+            </div>
+          </div>
+        `;
+        tip.style.display = 'block';
+        // 居中
+        const ttRect = tip.getBoundingClientRect();
+        tip.style.left = (window.innerWidth / 2 - ttRect.width / 2) + 'px';
+        tip.style.top = (window.innerHeight / 2 - ttRect.height / 2) + 'px';
+        requestAnimationFrame(() => {
+          const r = tip.getBoundingClientRect();
+          tip.style.left = (window.innerWidth / 2 - r.width / 2) + 'px';
+          tip.style.top = (window.innerHeight / 2 - r.height / 2) + 'px';
+        });
+        return;
+      }
+
+      // 普通步骤：高亮真实元素
+      tip.classList.remove('center');
+      const el = findEl(step);
+      if (!el) {
+        console.warn('未找到元素:', step.selector);
+        // 找不到元素时退化为居中提示
+        tip.classList.add('center');
+        tip.innerHTML = `
+          <span class="tt-tag">${step.tag}</span>
+          <h3>${step.title}</h3>
+          <p>${step.desc}</p>
+          <div class="tt-hint" style="color:#ff4d4f;">⚠ 当前界面未找到此元素，可能需要先打开相应面板。点"下一步"继续。</div>
+          <div class="tt-foot">
+            <div class="tt-prog"><b>${idx}</b> / ${steps.length - 2}</div>
+            <div class="tt-btns">
+              <button class="tt-btn tt-btn-ghost" data-action="prev" ${idx === 0 ? 'disabled' : ''}>上一步</button>
+              <button class="tt-btn tt-btn-primary" data-action="next">下一步</button>
+            </div>
+          </div>
+        `;
+        tip.style.display = 'block';
+        tip.style.left = (window.innerWidth / 2 - 220) + 'px';
+        tip.style.top = (window.innerHeight / 2 - tip.offsetHeight / 2) + 'px';
+        return;
+      }
+
+      const r = getRect(el);
+      const pad = 4;
+      hl.style.display = 'block';
+      hl.classList.add('pulse');
+      hl.style.left = (r.left - pad) + 'px';
+      hl.style.top = (r.top - pad) + 'px';
+      hl.style.width = (r.width + pad * 2) + 'px';
+      hl.style.height = (r.height + pad * 2) + 'px';
+
+      tip.innerHTML = `
+        <div class="tt-arrow"></div>
+        <span class="tt-tag">${step.tag}</span>
+        <h3>${step.title}</h3>
+        <p>${step.desc}</p>
+        ${step.hint ? `<div class="tt-hint">${step.hint}</div>` : ''}
+        <div class="tt-foot">
+          <div class="tt-prog"><b>${idx}</b> / ${steps.length - 2}</div>
+          <div class="tt-btns">
+            <button class="tt-btn tt-btn-ghost" data-action="prev" ${idx === 0 ? 'disabled' : ''}>上一步</button>
+            <button class="tt-btn tt-btn-primary" data-action="next">下一步</button>
+          </div>
+        </div>
+      `;
+      tip.style.width = '320px';
+      tip.style.display = 'block';
+      positionTip(r, step.placement);
+    }
+
+    function positionTip(targetRect, placement) {
+      const margin = 12;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const ttW = 320;
+      const ttH = tip.offsetHeight;
+      let top, left, actual = placement;
+
+      if (placement === 'bottom' && targetRect.bottom + margin + ttH > vh - 10) actual = 'top';
+      else if (placement === 'top' && targetRect.top - margin - ttH < 10) actual = 'bottom';
+      else if (placement === 'right' && targetRect.right + margin + ttW > vw - 10) actual = 'left';
+      else if (placement === 'left' && targetRect.left - margin - ttW < 10) actual = 'right';
+
+      tip.setAttribute('data-placement', actual);
+
+      if (actual === 'bottom') {
+        left = targetRect.left + targetRect.width / 2 - ttW / 2;
+        top = targetRect.bottom + margin;
+        tip.style.setProperty('--ax', (targetRect.left + targetRect.width / 2 - left) + 'px');
+      } else if (actual === 'top') {
+        left = targetRect.left + targetRect.width / 2 - ttW / 2;
+        top = targetRect.top - margin - ttH;
+        tip.style.setProperty('--ax', (targetRect.left + targetRect.width / 2 - left) + 'px');
+      } else if (actual === 'right') {
+        left = targetRect.right + margin;
+        top = targetRect.top + targetRect.height / 2 - ttH / 2;
+        tip.style.setProperty('--ay', (targetRect.top + targetRect.height / 2 - top) + 'px');
+      } else if (actual === 'left') {
+        left = targetRect.left - margin - ttW;
+        top = targetRect.top + targetRect.height / 2 - ttH / 2;
+        tip.style.setProperty('--ay', (targetRect.top + targetRect.height / 2 - top) + 'px');
+      }
+
+      left = Math.max(10, Math.min(left, vw - ttW - 10));
+      top = Math.max(10, Math.min(top, vh - ttH - 10));
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+    }
+
+    function next() {
+      if (current < steps.length - 1) {
+        current++;
+        render(current);
+      } else {
+        finish();
+      }
+    }
+    function prev() {
+      if (current > 0) {
+        current--;
+        render(current);
+      }
+    }
+    function finish() {
+      // 关闭本页，回到软件
+      window.location.href = '/';
+    }
+
+    tip.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const a = btn.dataset.action;
+      if (a === 'next') next();
+      else if (a === 'prev') prev();
+    });
+
+    window.addEventListener('resize', () => {
+      if (current >= 0) render(current);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (current < 0) return;
+      if (e.key === 'Escape') e.preventDefault();
+      if (e.key === 'ArrowRight' || e.key === 'Enter') next();
+      if (e.key === 'ArrowLeft' && current > 0) prev();
+    });
+
+    // 禁用右键
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    function startTour() {
+      requestAnimationFrame(() => requestAnimationFrame(() => next()));
+    }
+  </script>
+
+</body>
+</html>

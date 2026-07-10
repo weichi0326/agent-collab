@@ -1,0 +1,55 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "multi-agent-tool",
+  "version": "0.1.0",
+  "identifier": "com.multiagent.tool",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "node scripts/dev-server.mjs",
+    "beforeBuildCommand": "npm.cmd run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "多 Agent 协同工具",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.tavily.com https://api.search.brave.com https://google.serper.dev https://dashscope.aliyuncs.com https://open.bigmodel.cn https://api.deepseek.com https://api.moonshot.cn https://api.minimax.chat https://api.xiaomimimo.com https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.x.ai https://api.siliconflow.cn https://openrouter.ai https://api.together.xyz http://localhost:18081; script-src 'self'",
+      "devCsp": "default-src 'self' http://127.0.0.1:5173 http://localhost:5173; style-src 'self' 'unsafe-inline' http://127.0.0.1:5173 http://localhost:5173; img-src 'self' data: blob: http://127.0.0.1:5173 http://localhost:5173; font-src 'self' data: http://127.0.0.1:5173 http://localhost:5173; connect-src 'self' http://127.0.0.1:5173 http://localhost:5173 ws://127.0.0.1:5173 ws://localhost:5173 http://localhost:18081 https://api.tavily.com https://api.search.brave.com https://google.serper.dev https://dashscope.aliyuncs.com https://open.bigmodel.cn https://api.deepseek.com https://api.moonshot.cn https://api.minimax.chat https://api.xiaomimimo.com https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.x.ai https://api.siliconflow.cn https://openrouter.ai https://api.together.xyz; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:5173 http://localhost:5173"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "multi-agent-tool",
+    "copyright": "Copyright © 2026 multi-agent-tool",
+    "resources": {
+      "python-dist": "python"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"]
+      }
+    },
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}

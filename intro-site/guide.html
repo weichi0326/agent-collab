@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>使用指引 · 多 Agent 协同工具</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-soft: #fafbfc;
+      --bg-mute: #f3f5f8;
+      --ink-1: #1d2129;
+      --ink-2: #4e5969;
+      --ink-3: #86909c;
+      --ink-4: #c9cdd4;
+      --brand: #1890ff;
+      --brand-soft: #e8f3ff;
+      --brand-deep: #096dd9;
+      --accent-green: #52c41a;
+      --accent-orange: #fa8c16;
+      --accent-purple: #722ed1;
+      --line: #e5e6eb;
+      --shadow-md: 0 4px 12px rgba(10, 15, 24, 0.06), 0 1px 3px rgba(10, 15, 24, 0.04);
+      --shadow-lg: 0 12px 32px rgba(10, 15, 24, 0.16), 0 4px 8px rgba(10, 15, 24, 0.08);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink-1);
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+    }
+    button { font-family: inherit; cursor: pointer; border: none; background: none; }
+
+    /* ====== 软件主界面（仿真还原） ====== */
+    .app-shell {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      grid-template-rows: 44px 1fr 26px;
+      background: #fff;
+    }
+
+    /* 标题栏 */
+    .titlebar {
+      display: flex;
+      align-items: center;
+      background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+      border-bottom: 1px solid var(--line);
+      padding: 0 14px;
+      gap: 8px;
+      position: relative;
+      z-index: 5;
+    }
+    .app-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      padding-right: 12px;
+      border-right: 1px solid var(--line);
+      margin-right: 6px;
+    }
+    .app-logo-mark {
+      width: 22px; height: 22px;
+      border-radius: 5px;
+      background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+      display: grid; place-items: center;
+      color: #fff;
+    }
+    .app-logo-mark svg { width: 13px; height: 13px; }
+    .tb-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 11px;
+      font-size: 12.5px;
+      color: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #fff;
+      transition: all .15s;
+      height: 28px;
+    }
+    .tb-btn:hover { color: var(--brand); border-color: var(--brand); }
+    .tb-btn.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+    .tb-btn.primary:hover { background: var(--brand-deep); }
+    .tb-btn.warn { color: var(--accent-orange); border-color: var(--accent-orange); }
+    .tb-btn svg { width: 12px; height: 12px; }
+    .tb-mode {
+      margin-left: auto;
+      font-size: 11.5px;
+      color: var(--ink-3);
+      padding: 4px 10px;
+      background: var(--bg-mute);
+      border-radius: 4px;
+    }
+
+    /* 主体三栏 */
+    .main {
+      display: grid;
+      grid-template-columns: 232px 1fr 268px;
+      overflow: hidden;
+    }
+
+    /* 左侧栏 */
+    .left-sidebar {
+      background: var(--bg-soft);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .left-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+    .left-tab {
+      flex: 1;
+      padding: 9px 0;
+      text-align: center;
+      font-size: 12px;
+      color: var(--ink-2);
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .left-tab:hover { color: var(--brand); }
+    .left-tab.active {
+      color: var(--brand);
+      border-bottom-color: var(--brand);
+      font-weight: 500;
+      background: var(--brand-soft);
+    }
+    .left-body {
+      flex: 1;
+      overflow: auto;
+      padding: 10px;
+    }
+    .left-search {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .left-search-input {
+      flex: 1;
+      padding: 5px 9px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #fff;
+      color: var(--ink-2);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .left-search-input svg { width: 11px; height: 11px; color: var(--ink-3); }
+    .left-new-btn {
+      padding: 5px 11px;
+      font-size: 12px;
+      background: var(--brand);
+      color: #fff;
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .left-new-btn svg { width: 10px; height: 10px; }
+
+    .agent-card {
+      padding: 9px 11px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      cursor: grab;
+      transition: all .15s;
+      position: relative;
+    }
+    .agent-card:hover {
+      border-color: var(--brand);
+      box-shadow: 0 2px 6px rgba(24, 144, 255, 0.12);
+    }
+    .agent-card-head {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 4px;
+    }
+    .agent-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent-green);
+    }
+    .agent-name {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--ink-1);
+      flex: 1;
+    }
+    .agent-edit {
+      width: 18px; height: 18px;
+      border-radius: 3px;
+      display: grid; place-items: center;
+      color: var(--ink-3);
+      opacity: 0;
+      transition: opacity .15s;
+    }
+    .agent-card:hover .agent-edit { opacity: 1; }
+    .agent-edit svg { width: 11px; height: 11px; }
+    .agent-desc {
+      font-size: 11px;
+      color: var(--ink-3);
+      line-height: 1.5;
+      margin-bottom: 6px;
+    }
+    .agent-tags { display: flex; flex-wrap: wrap; gap: 3px; }
+    .agent-tag {
+      padding: 1px 6px;
+      font-size: 10px;
+      background: var(--bg-mute);
+      color: var(--ink-2);
+      border-radius: 3px;
+    }
+
+    /* 画布页签列表 */
+    .canvas-list-item {
+      padding: 7px 9px;
+      border-radius: 5px;
+      font-size: 12px;
+      color: var(--ink-2);
+      margin-bottom: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .canvas-list-item:hover { background: #fff; }
+    .canvas-list-item.active {
+      background: var(--brand-soft);
+      color: var(--brand-deep);
+      font-weight: 500;
+    }
+    .canvas-list-item svg { width: 11px; height: 11px; opacity: .7; }
+
+    /* 画布区 */
+    .canvas-area {
+      position: relative;
+      background:
+        linear-gradient(rgba(24, 144, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(24, 144, 255, 0.04) 1px, transparent 1px),
+        #fff;
+      background-size: 20px 20px;
+      overflow: hidden;
+    }
+    .canvas-tabs {
+      display: flex;
+      background: var(--bg-soft);
+      border-bottom: 1px solid var(--line);
+      height: 34px;
+      align-items: center;
+      padding: 0 8px;
+      gap: 2px;
+    }
+    .canvas-tab {
+      padding: 5px 12px;
+      font-size: 12px;
+      color: var(--ink-2);
+      border-radius: 5px 5px 0 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid transparent;
+    }
+    .canvas-tab.active {
+      background: #fff;
+      border-color: var(--line);
+      border-bottom-color: #fff;
+      color: var(--ink-1);
+      font-weight: 500;
+      position: relative;
+    }
+    .canvas-tab.active::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--brand);
+    }
+    .canvas-tab .close {
+      width: 12px; height: 12px;
+      border-radius: 2px;
+      display: grid; place-items: center;
+      color: var(--ink-3);
+    }
+    .canvas-tab .close:hover { background: var(--line); color: var(--ink-1); }
+
+    .canvas-toolbar {
+      position: absolute;
+      top: 50px;
+      left: 12px;
+      display: flex;
+      gap: 4px;
+      background: #fff;
+      padding: 4px;
+      border-radius: 6px;
+      box-shadow: var(--shadow-md);
+      border: 1px solid var(--line);
+      z-index: 3;
+    }
+    .ct-btn {
+      width: 26px; height: 26px;
+      display: grid; place-items: center;
+      border-radius: 4px;
+      color: var(--ink-2);
+    }
+    .ct-btn:hover { background: var(--bg-mute); color: var(--brand); }
+    .ct-btn svg { width: 13px; height: 13px; }
+
+    .canvas-stage {
+      position: absolute;
+      top: 34px;
+      left: 0; right: 0; bottom: 0;
+    }
+
+    /* 画布节点 */
+    .canvas-node {
+      position: absolute;
+      min-width: 140px;
+      padding: 10px 12px;
+      background: #fff;
+      border: 1.5px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(10, 15, 24, 0.06);
+      font-size: 12px;
+      z-index: 2;
+    }
+    .canvas-node.running {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 4px rgba(24, 144, 255, 0.12), 0 2px 6px rgba(10, 15, 24, 0.06);
+    }
+    .canvas-node.success { border-color: var(--accent-green); }
+    .canvas-node.waiting { border-color: var(--accent-orange); opacity: .85; }
+    .cn-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .cn-icon {
+      width: 18px; height: 18px;
+      border-radius: 4px;
+      background: var(--brand-soft);
+      color: var(--brand);
+      display: grid; place-items: center;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .canvas-node.success .cn-icon { background: #f0fff0; color: var(--accent-green); }
+    .canvas-node.waiting .cn-icon { background: #fff7e6; color: var(--accent-orange); }
+    .cn-name {
+      font-weight: 600;
+      font-size: 12.5px;
+      color: var(--ink-1);
+      flex: 1;
+    }
+    .cn-status {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 500;
+    }
+    .canvas-node.running .cn-status { background: var(--brand); color: #fff; }
+    .canvas-node.success .cn-status { background: var(--accent-green); color: #fff; }
+    .canvas-node.waiting .cn-status { background: var(--accent-orange); color: #fff; }
+    .cn-time {
+      font-size: 10.5px;
+      color: var(--ink-3);
+      margin-top: 2px;
+    }
+
+    /* 节点端口 */
+    .cn-port {
+      position: absolute;
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--brand);
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    .cn-port.right { right: -5px; }
+    .cn-port.left { left: -5px; }
+
+    /* 画布连线 SVG */
+    .canvas-edges {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* 右侧属性面板 */
+    .right-panel {
+      background: #fff;
+      border-left: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .rp-head {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .rp-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--ink-1);
+    }
+    .rp-body {
+      flex: 1;
+      overflow: auto;
+      padding: 12px;
+    }
+    .rp-section {
+      margin-bottom: 16px;
+    }
+    .rp-section-title {
+      font-size: 11px;
+      color: var(--ink-3);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .rp-field {
+      margin-bottom: 8px;
+    }
+    .rp-field-label {
+      font-size: 11px;
+      color: var(--ink-3);
+      margin-bottom: 3px;
+    }
+    .rp-field-value {
+      padding: 5px 8px;
+      background: var(--bg-soft);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font-size: 11.5px;
+      color: var(--ink-1);
+    }
+    .rp-field-value.muted { color: var(--ink-3); }
+
+    /* 状态栏 */
+    .statusbar {
+      background: var(--bg-soft);
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      gap: 16px;
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+    .sb-item { display: flex; align-items: center; gap: 4px; }
+    .sb-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent-orange);
+    }
+
+    /* 姬子 pill */
+    .master-pill {
+      position: fixed;
+      bottom: 38px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 18px;
+      background: linear-gradient(135deg, #722ed1 0%, #1890ff 100%);
+      color: #fff;
+      border-radius: 999px;
+      box-shadow: 0 6px 18px rgba(114, 46, 209, 0.4);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      z-index: 10;
+    }
+    .master-pill svg { width: 14px; height: 14px; }
+    .master-pill .arrow {
+      width: 10px; height: 10px;
+      transition: transform .3s;
+    }
+    .master-pill.expanded .arrow { transform: rotate(180deg); }
+
+    /* ====== 引导层 ====== */
+    .tour-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1000;
+    }
+    .tour-highlight {
+      position: absolute;
+      border-radius: 6px;
+      box-shadow: 0 0 0 9999px rgba(10, 15, 24, 0.62);
+      border: 2px solid var(--brand);
+      transition: all .45s cubic-bezier(.16, 1, .3, 1);
+      pointer-events: none;
+    }
+    .tour-highlight.pulse {
+      animation: highlight-pulse 2s ease-in-out infinite;
+    }
+    @keyframes highlight-pulse {
+      0%, 100% { box-shadow: 0 0 0 9999px rgba(10, 15, 24, 0.62), 0 0 0 0 rgba(24, 144, 255, 0.5); }
+      50% { box-shadow: 0 0 0 9999px rgba(10, 15, 24, 0.62), 0 0 0 8px rgba(24, 144, 255, 0); }
+    }
+
+    /* 浮窗气泡 */
+    .tour-tooltip {
+      position: absolute;
+      width: 320px;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 12px 36px rgba(10, 15, 24, 0.22), 0 4px 10px rgba(10, 15, 24, 0.1);
+      padding: 16px 18px;
+      transition: all .45s cubic-bezier(.16, 1, .3, 1);
+      pointer-events: auto;
+      z-index: 1001;
+    }
+    .tt-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      background: var(--brand-soft);
+      color: var(--brand-deep);
+      font-size: 11px;
+      font-weight: 500;
+      border-radius: 999px;
+      margin-bottom: 8px;
+    }
+    .tt-tag::before {
+      content: '';
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--brand);
+    }
+    .tour-tooltip h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--ink-1);
+      line-height: 1.4;
+    }
+    .tour-tooltip p {
+      font-size: 12.5px;
+      color: var(--ink-2);
+      line-height: 1.65;
+      margin-bottom: 4px;
+    }
+    .tour-tooltip .tt-hint {
+      font-size: 11.5px;
+      color: var(--ink-3);
+      padding: 8px 10px;
+      background: var(--bg-soft);
+      border-radius: 6px;
+      margin-top: 10px;
+      line-height: 1.6;
+    }
+    .tour-tooltip .tt-hint b { color: var(--brand-deep); }
+    .tt-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .tt-progress {
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+    .tt-progress b { color: var(--ink-1); font-weight: 600; }
+    .tt-buttons { display: flex; gap: 6px; }
+    .tt-btn {
+      padding: 6px 14px;
+      font-size: 12px;
+      border-radius: 5px;
+      transition: all .15s;
+      font-weight: 500;
+    }
+    .tt-btn-ghost {
+      color: var(--ink-2);
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .tt-btn-ghost:not(:disabled):hover { color: var(--brand); border-color: var(--brand); }
+    .tt-btn-ghost:disabled { opacity: .4; cursor: not-allowed; }
+    .tt-btn-primary {
+      background: var(--brand);
+      color: #fff;
+    }
+    .tt-btn-primary:hover { background: var(--brand-deep); }
+    .tt-btn-success {
+      background: var(--accent-green);
+      color: #fff;
+    }
+    .tt-btn-success:hover { background: #389e0d; }
+
+    /* 浮窗箭头 */
+    .tt-arrow {
+      position: absolute;
+      width: 12px; height: 12px;
+      background: #fff;
+      transform: rotate(45deg);
+      border-radius: 2px;
+    }
+    .tour-tooltip[data-placement="bottom"] .tt-arrow {
+      top: -6px;
+      left: var(--arrow-x, 50%);
+      margin-left: -6px;
+      border-top: 1px solid rgba(10,15,24,0.06);
+      border-left: 1px solid rgba(10,15,24,0.06);
+    }
+    .tour-tooltip[data-placement="top"] .tt-arrow {
+      bottom: -6px;
+      left: var(--arrow-x, 50%);
+      margin-left: -6px;
+      border-bottom: 1px solid rgba(10,15,24,0.06);
+      border-right: 1px solid rgba(10,15,24,0.06);
+    }
+    .tour-tooltip[data-placement="right"] .tt-arrow {
+      left: -6px;
+      top: var(--arrow-y, 50%);
+      margin-top: -6px;
+      border-left: 1px solid rgba(10,15,24,0.06);
+      border-bottom: 1px solid rgba(10,15,24,0.06);
+    }
+    .tour-tooltip[data-placement="left"] .tt-arrow {
+      right: -6px;
+      top: var(--arrow-y, 50%);
+      margin-top: -6px;
+      border-right: 1px solid rgba(10,15,24,0.06);
+      border-top: 1px solid rgba(10,15,24,0.06);
+    }
+
+    /* 中央欢迎/完成浮窗 */
+    .tour-tooltip.center {
+      width: 440px;
+      padding: 28px 32px;
+      text-align: center;
+    }
+    .tour-tooltip.center .tt-icon {
+      width: 56px; height: 56px;
+      margin: 0 auto 14px;
+      border-radius: 16px;
+      display: grid; place-items: center;
+      color: #fff;
+    }
+    .tour-tooltip.center .tt-icon.welcome {
+      background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+      box-shadow: 0 8px 20px rgba(24, 144, 255, 0.35);
+    }
+    .tour-tooltip.center .tt-icon.finale {
+      background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+      box-shadow: 0 8px 20px rgba(82, 196, 26, 0.35);
+    }
+    .tour-tooltip.center .tt-icon svg { width: 28px; height: 28px; }
+    .tour-tooltip.center h3 { font-size: 19px; margin-bottom: 8px; }
+    .tour-tooltip.center p { font-size: 13px; margin-bottom: 0; }
+    .tour-tooltip.center .tt-warn {
+      margin: 14px 0 0;
+      padding: 10px 14px;
+      background: #fff7e6;
+      border: 1px solid #ffd591;
+      border-radius: 8px;
+      color: #ad6800;
+      font-size: 12px;
+      text-align: left;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .tour-tooltip.center .tt-warn svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; }
+    .tour-tooltip.center .tt-tips {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 14px 0 0;
+      text-align: left;
+    }
+    .tour-tooltip.center .tt-tip {
+      padding: 10px;
+      background: var(--bg-soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--ink-2);
+    }
+    .tour-tooltip.center .tt-tip b {
+      color: var(--ink-1);
+      display: block;
+      margin-bottom: 3px;
+      font-size: 12px;
+    }
+
+    /* 顶部进度条 */
+    .tour-progress-bar {
+      position: fixed;
+      top: 0; left: 0;
+      height: 3px;
+      width: 0%;
+      background: linear-gradient(90deg, #1890ff 0%, #722ed1 100%);
+      z-index: 1002;
+      transition: width .45s cubic-bezier(.16, 1, .3, 1);
+      box-shadow: 0 0 8px rgba(24, 144, 255, 0.5);
+    }
+
+    /* 跳过按钮（仅门面显示） */
+    .tour-skip {
+      position: fixed;
+      top: 14px;
+      right: 18px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.7);
+      z-index: 1003;
+      cursor: pointer;
+      padding: 4px 10px;
+      border-radius: 4px;
+      transition: all .15s;
+      display: none;
+    }
+    .tour-skip:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }
+    .tour-skip.show { display: block; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部进度条 -->
+  <div class="tour-progress-bar" id="progressBar"></div>
+
+  <!-- 跳过按钮（隐藏，本引导不可跳过，但保留出口给"返回介绍页"） -->
+  <a class="tour-skip" id="skipBtn" href="index.html">返回介绍页</a>
+
+  <!-- ====== 软件主界面仿真 ====== -->
+  <div class="app-shell">
+
+    <!-- 标题栏 -->
+    <div class="titlebar">
+      <div class="app-logo">
+        <div class="app-logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7 L10 16 M16 7 L14 16"/></svg>
+        </div>
+        <span>多 Agent 协同工具</span>
+      </div>
+      <button class="tb-btn primary" id="tour-run">
+        <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>
+        运行
+      </button>
+      <button class="tb-btn warn" id="tour-stop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+        中止任务
+      </button>
+      <button class="tb-btn" id="tour-model">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        模型配置
+      </button>
+      <button class="tb-btn" id="tour-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        搜索配置
+      </button>
+      <button class="tb-btn" id="tour-report">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>
+        报告中心
+      </button>
+      <div class="tb-mode">工作台模式</div>
+    </div>
+
+    <!-- 主体 -->
+    <div class="main">
+
+      <!-- 左侧栏 -->
+      <div class="left-sidebar">
+        <div class="left-tabs">
+          <div class="left-tab active" id="tour-tab-agents">Agent 库</div>
+          <div class="left-tab" id="tour-tab-canvas">画布</div>
+          <div class="left-tab" id="tour-tab-history">运行历史</div>
+        </div>
+        <div class="left-body">
+          <div class="left-search">
+            <div class="left-search-input">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <span style="color:var(--ink-3);">搜索 Agent...</span>
+            </div>
+            <button class="left-new-btn" id="tour-new-agent">
+              新建
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          </div>
+
+          <div class="agent-card" id="tour-agent-1">
+            <div class="agent-card-head">
+              <span class="agent-dot"></span>
+              <span class="agent-name">需求分析师</span>
+              <button class="agent-edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            </div>
+            <div class="agent-desc">解析需求文档,提炼可测试的功能点与验收要点。</div>
+            <div class="agent-tags">
+              <span class="agent-tag">file-read</span>
+              <span class="agent-tag">pdf-read</span>
+              <span class="agent-tag">llm-calling</span>
+            </div>
+          </div>
+
+          <div class="agent-card">
+            <div class="agent-card-head">
+              <span class="agent-dot"></span>
+              <span class="agent-name">测试用例生成器</span>
+              <button class="agent-edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            </div>
+            <div class="agent-desc">基于功能点批量生成结构化测试用例。</div>
+            <div class="agent-tags">
+              <span class="agent-tag">excel</span>
+              <span class="agent-tag">llm-calling</span>
+            </div>
+          </div>
+
+          <div class="agent-card">
+            <div class="agent-card-head">
+              <span class="agent-dot"></span>
+              <span class="agent-name">Bug 报告生成器</span>
+              <button class="agent-edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+            </div>
+            <div class="agent-desc">把零散的问题描述整理成规范的缺陷报告。</div>
+            <div class="agent-tags">
+              <span class="agent-tag">file-write</span>
+              <span class="agent-tag">llm-calling</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 画布区 -->
+      <div class="canvas-area">
+        <div class="canvas-tabs">
+          <div class="canvas-tab active">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            测试用例流水线.canvas
+            <span class="close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:9px;height:9px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+          </div>
+          <div class="canvas-tab" style="color:var(--accent-orange);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;color:var(--accent-orange);"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            测试用例流水线_20260706143022
+            <span class="close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:9px;height:9px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+          </div>
+        </div>
+
+        <div class="canvas-toolbar">
+          <button class="ct-btn" title="适合屏幕"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>
+          <button class="ct-btn" title="撤销"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+          <button class="ct-btn" title="重命名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+        </div>
+
+        <div class="canvas-stage" id="canvasStage">
+          <!-- 连线 -->
+          <svg class="canvas-edges" preserveAspectRatio="none">
+            <defs>
+              <marker id="arrBlue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#1890ff"/></marker>
+              <marker id="arrGreen" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#52c41a"/></marker>
+            </defs>
+            <path d="M 200 90 C 280 90, 320 90, 380 90" stroke="#1890ff" stroke-width="1.8" fill="none" marker-end="url(#arrBlue)" stroke-dasharray="5 3"/>
+            <path d="M 450 110 C 450 160, 320 200, 290 220" stroke="#52c41a" stroke-width="1.8" fill="none" marker-end="url(#arrGreen)" stroke-dasharray="5 3"/>
+            <path d="M 200 110 C 200 160, 270 200, 280 220" stroke="#52c41a" stroke-width="1.8" fill="none" marker-end="url(#arrGreen)" stroke-dasharray="5 3"/>
+          </svg>
+
+          <!-- 节点 1: 需求分析师 -->
+          <div class="canvas-node success" id="tour-node-1" style="top:60px;left:60px;">
+            <div class="cn-port right"></div>
+            <div class="cn-head">
+              <div class="cn-icon">需</div>
+              <div class="cn-name">需求分析师</div>
+              <div class="cn-status">已成功</div>
+            </div>
+            <div class="cn-time">已运行：00:00:12</div>
+          </div>
+
+          <!-- 节点 2: 测试用例生成器 -->
+          <div class="canvas-node running" id="tour-node-2" style="top:60px;left:380px;">
+            <div class="cn-port left"></div>
+            <div class="cn-port right"></div>
+            <div class="cn-head">
+              <div class="cn-icon">例</div>
+              <div class="cn-name">测试用例生成器</div>
+              <div class="cn-status">运行中</div>
+            </div>
+            <div class="cn-time">已运行：00:00:08</div>
+          </div>
+
+          <!-- 节点 3: Bug 报告生成器 -->
+          <div class="canvas-node waiting" id="tour-node-3" style="top:220px;left:240px;">
+            <div class="cn-port left"></div>
+            <div class="cn-head">
+              <div class="cn-icon">Bug</div>
+              <div class="cn-name">Bug 报告生成器</div>
+              <div class="cn-status">等待中</div>
+            </div>
+            <div class="cn-time">未运行</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧属性面板 -->
+      <div class="right-panel" id="tour-right-panel">
+        <div class="rp-head">
+          <div class="rp-title">属性 · 测试用例生成器</div>
+        </div>
+        <div class="rp-body">
+          <div class="rp-section">
+            <div class="rp-section-title">基础</div>
+            <div class="rp-field">
+              <div class="rp-field-label">名称</div>
+              <div class="rp-field-value">测试用例生成器</div>
+            </div>
+            <div class="rp-field">
+              <div class="rp-field-label">输出格式</div>
+              <div class="rp-field-value">Excel (.xlsx)</div>
+            </div>
+          </div>
+          <div class="rp-section">
+            <div class="rp-section-title">数据来源</div>
+            <div class="rp-field">
+              <div class="rp-field-label">前序节点</div>
+              <div class="rp-field-value">需求分析师</div>
+            </div>
+          </div>
+          <div class="rp-section">
+            <div class="rp-section-title">本次输出</div>
+            <div class="rp-field">
+              <div class="rp-field-label">产物文件</div>
+              <div class="rp-field-value muted">运行中，尚未生成...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 状态栏 -->
+    <div class="statusbar">
+      <div class="sb-item"><span class="sb-dot"></span>节点 3</div>
+      <div class="sb-item">连线 3</div>
+      <div class="sb-item" style="color:var(--brand);">● 运行中</div>
+      <div class="sb-item">完成 1 / 3</div>
+      <div class="sb-item" style="margin-left:auto;">已用时 20s</div>
+    </div>
+  </div>
+
+  <!-- 姬子 pill -->
+  <div class="master-pill" id="tour-master">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    姬子 · 自然语言控制
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </div>
+
+  <!-- ====== 引导层 ====== -->
+  <div class="tour-overlay">
+    <div class="tour-highlight" id="highlightBox" style="display:none;"></div>
+    <div class="tour-tooltip" id="tooltip" style="display:none;"></div>
+  </div>
+
+  <script>
+    // ====== 步骤定义 ======
+    // target: CSS 选择器；placement: top/bottom/left/right/center
+    const steps = [
+      {
+        center: true,
+        icon: 'welcome',
+        iconSvg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-4"/><rect x="9" y="2" width="6" height="11" rx="2"/></svg>',
+        tag: '欢迎',
+        title: '这是多 Agent 协同工具的使用指引',
+        desc: '约 9 步，2 分钟。我会依次高亮界面上的关键区域，告诉你每个地方是做什么的、怎么用。',
+        warn: '本引导不可跳过。请按顺序看完每一步，最后才会出现"完成"按钮。中途可点"上一步"回看，但无法向前跳跃。',
+        btn: '开始'
+      },
+      {
+        target: '#tour-model',
+        placement: 'bottom',
+        tag: '第 1 步 · 配置 LLM',
+        title: '先在这里配置 LLM 的 API Key',
+        desc: 'Agent 必须挂一个可用的 LLM 才能跑。点这个按钮打开「模型配置中心」。',
+        hint: '预置 13 家厂商（OpenAI / Anthropic / DeepSeek / Kimi 等），选一家填 Key、点「通信测试」通过即可。',
+      },
+      {
+        target: '#tour-new-agent',
+        placement: 'right',
+        tag: '第 2 步 · 新建 Agent',
+        title: '从预置模板新建一个 Agent',
+        desc: '点「新建」下拉，从 3 个预置模板（需求分析师 / 测试用例生成器 / Bug 报告生成器）里选一个落库。',
+        hint: '模板落库后可立即编辑：<b>改名、改提示词、改工具标签、选第 1 步配置的模型</b>。'
+      },
+      {
+        target: '#tour-agent-1',
+        placement: 'right',
+        tag: '第 3 步 · Agent 卡片',
+        title: '这是建好的 Agent，按住拖到画布',
+        desc: 'Agent 库里的卡片可以按住拖到中间画布。拖入即「快照复制」为节点实例，与库里的定义完全解耦。',
+        hint: 'hover 卡片右侧会出现编辑图标，可改提示词与工具标签。'
+      },
+      {
+        target: '#tour-tab-canvas',
+        placement: 'bottom',
+        tag: '第 4 步 · 切换页签',
+        title: '切到「画布」页签管理画布',
+        desc: 'Agent 库管理 Agent，画布页签管理画布。点这里切换。',
+        hint: '画布是 Agent 的编排容器，节点只能在画布上运行。'
+      },
+      {
+        target: '#tour-node-1',
+        placement: 'right',
+        tag: '第 5 步 · 画布节点',
+        title: '画布上的节点可以画箭头连线',
+        desc: '鼠标悬停节点右侧会出现小圆点（输出端口），按住拖到下一个节点的输入端口，会生成带箭头的蓝色连线。',
+        hint: '连线即「上游输出 → 下游输入」的数据通道。选中连线按 <code>Delete</code> 可删除。'
+      },
+      {
+        target: '#tour-run',
+        placement: 'bottom',
+        tag: '第 6 步 · 运行画布',
+        title: '点「运行」按依赖图自动跑',
+        desc: '会先复制一张只读运行副本，按拓扑顺序执行节点。依赖满足的节点并行（最大 4 并发），临时 LLM 失败会节点级补跑。',
+        hint: '运行中按钮会变成「中止任务」，可中途停下。运行副本 tab 会同屏显示进度。'
+      },
+      {
+        target: '#tour-right-panel',
+        placement: 'left',
+        tag: '第 7 步 · 属性面板',
+        title: '这里看节点配置与本次输出',
+        desc: '选中画布节点后，右侧属性面板显示该节点实例的名称、输出格式、数据来源、本次产物文件。',
+        hint: '运行结束后，<b>双击产物文件名</b>可直接系统打开。'
+      },
+      {
+        target: '#tour-report',
+        placement: 'bottom',
+        tag: '第 8 步 · 报告中心',
+        title: '所有历史产物都在这里',
+        desc: '点「报告中心」切换到报告视图，集中查看总运行次数、成功率、产物数、平均耗时、画布/节点表现。',
+        hint: '历史产物表格支持按画布/格式/关键词筛选，可定位文件夹、二次确认删除。'
+      },
+      {
+        target: '#tour-master',
+        placement: 'top',
+        tag: '第 9 步 · 姬子',
+        title: '嫌麻烦？让姬子用自然语言帮你',
+        desc: '点这个 pill 打开姬子抽屉，直接说人话，比如「建一条需求→用例→Bug 的流水线」，她会用 LLM 规划出多步动作、列表确认后执行。',
+        hint: '支持：建画布 / 加节点 / 连线 / 删节点 / 改输出格式 / 运行当前画布。规划失败有规则兜底。'
+      },
+      {
+        center: true,
+        icon: 'finale',
+        iconSvg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+        tag: '完成',
+        title: '引导结束，可以开始用了',
+        desc: '你已经认识完界面上所有关键区域。回到软件，按指引的顺序操作即可。',
+        tips: [
+          { b: '第一次跑', t: '用预置模板建 3 个 Agent，连一条最简单的流水线试运行。' },
+          { b: '遇到问题', t: '先看标题栏「重启后台」按钮，再看报告中心的历史记录与错误信息。' },
+          { b: '想偷懒', t: '直接打开姬子抽屉，用自然语言描述需求让她帮你建画布。' }
+        ],
+        btn: '完成',
+        success: true
+      }
+    ];
+
+    // ====== DOM ======
+    const highlightBox = document.getElementById('highlightBox');
+    const tooltip = document.getElementById('tooltip');
+    const progressBar = document.getElementById('progressBar');
+    const skipBtn = document.getElementById('skipBtn');
+
+    let current = -1;
+
+    // ====== 工具：获取元素位置（含 border 半径） ======
+    function getRect(el) {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.bottom, right: r.right };
+    }
+
+    // ====== 渲染步骤 ======
+    function render(idx) {
+      const step = steps[idx];
+      if (!step) return;
+
+      // 进度条
+      const pct = ((idx + 1) / steps.length) * 100;
+      progressBar.style.width = pct + '%';
+
+      // 跳过按钮：仅非首尾步骤显示"返回介绍页"
+      if (idx === 0 || idx === steps.length - 1) {
+        skipBtn.classList.remove('show');
+      } else {
+        skipBtn.classList.add('show');
+      }
+
+      if (step.center) {
+        // 中央浮窗，不高亮任何元素
+        highlightBox.style.display = 'none';
+        const rect = { width: window.innerWidth, height: window.innerHeight };
+        const isLast = idx === steps.length - 1;
+        let body = '';
+        if (isLast && step.tips) {
+          body = `
+            <div class="tt-tips">
+              ${step.tips.map(t => `<div class="tt-tip"><b>${t.b}</b>${t.t}</div>`).join('')}
+            </div>
+          `;
+        }
+        if (idx === 0 && step.warn) {
+          body = `
+            <div class="tt-warn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <div>${step.warn}</div>
+            </div>
+          `;
+        }
+        tooltip.style.width = '';
+        tooltip.classList.add('center');
+        tooltip.removeAttribute('data-placement');
+        tooltip.innerHTML = `
+          <div class="tt-icon ${step.icon}">${step.iconSvg}</div>
+          <span class="tt-tag">${step.tag}</span>
+          <h3>${step.title}</h3>
+          <p>${step.desc}</p>
+          ${body}
+          <div class="tt-foot" style="justify-content:center;margin-top:18px;">
+            <div class="tt-buttons" style="margin:0 auto;">
+              ${idx > 0 ? '<button class="tt-btn tt-btn-ghost" data-action="prev">上一步</button>' : ''}
+              <button class="tt-btn ${step.success ? 'tt-btn-success' : 'tt-btn-primary'}" data-action="next">${step.btn || '下一步'}</button>
+            </div>
+          </div>
+        `;
+        // 居中
+        tooltip.style.left = (rect.width / 2 - 220) + 'px';
+        tooltip.style.top = (rect.height / 2 - tooltip.offsetHeight / 2) + 'px';
+        tooltip.style.display = 'block';
+        // 居中后重算垂直位置
+        requestAnimationFrame(() => {
+          tooltip.style.top = (rect.height / 2 - tooltip.offsetHeight / 2) + 'px';
+        });
+        return;
+      }
+
+      // 普通步骤：高亮目标
+      tooltip.classList.remove('center');
+      const target = document.querySelector(step.target);
+      if (!target) {
+        console.warn('Target not found:', step.target);
+        return;
+      }
+      const r = getRect(target);
+      const padding = 4;
+      highlightBox.style.display = 'block';
+      highlightBox.classList.add('pulse');
+      highlightBox.style.left = (r.left - padding) + 'px';
+      highlightBox.style.top = (r.top - padding) + 'px';
+      highlightBox.style.width = (r.width + padding * 2) + 'px';
+      highlightBox.style.height = (r.height + padding * 2) + 'px';
+
+      // 浮窗内容
+      tooltip.innerHTML = `
+        <div class="tt-arrow"></div>
+        <span class="tt-tag">${step.tag}</span>
+        <h3>${step.title}</h3>
+        <p>${step.desc}</p>
+        ${step.hint ? `<div class="tt-hint">${step.hint}</div>` : ''}
+        <div class="tt-foot">
+          <div class="tt-progress"><b>${idx}</b> / ${steps.length - 2}</div>
+          <div class="tt-buttons">
+            <button class="tt-btn tt-btn-ghost" data-action="prev" ${idx === 0 ? 'disabled' : ''}>上一步</button>
+            <button class="tt-btn tt-btn-primary" data-action="next">下一步</button>
+          </div>
+        </div>
+      `;
+      tooltip.style.display = 'block';
+      tooltip.style.width = '320px';
+
+      // 浮窗定位
+      positionTooltip(r, step.placement);
+    }
+
+    function positionTooltip(targetRect, placement) {
+      const tt = tooltip;
+      const margin = 12;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const ttW = 320;
+      const ttH = tt.offsetHeight;
+
+      let top, left, actualPlacement = placement;
+
+      // 自动翻转：如果空间不够就换边
+      if (placement === 'bottom' && targetRect.bottom + margin + ttH > vh - 10) {
+        actualPlacement = 'top';
+      } else if (placement === 'top' && targetRect.top - margin - ttH < 10) {
+        actualPlacement = 'bottom';
+      } else if (placement === 'right' && targetRect.right + margin + ttW > vw - 10) {
+        actualPlacement = 'left';
+      } else if (placement === 'left' && targetRect.left - margin - ttW < 10) {
+        actualPlacement = 'right';
+      }
+
+      tt.setAttribute('data-placement', actualPlacement);
+
+      if (actualPlacement === 'bottom') {
+        left = targetRect.left + targetRect.width / 2 - ttW / 2;
+        top = targetRect.bottom + margin;
+        tt.style.setProperty('--arrow-x', (targetRect.left + targetRect.width / 2 - left) + 'px');
+      } else if (actualPlacement === 'top') {
+        left = targetRect.left + targetRect.width / 2 - ttW / 2;
+        top = targetRect.top - margin - ttH;
+        tt.style.setProperty('--arrow-x', (targetRect.left + targetRect.width / 2 - left) + 'px');
+      } else if (actualPlacement === 'right') {
+        left = targetRect.right + margin;
+        top = targetRect.top + targetRect.height / 2 - ttH / 2;
+        tt.style.setProperty('--arrow-y', (targetRect.top + targetRect.height / 2 - top) + 'px');
+      } else if (actualPlacement === 'left') {
+        left = targetRect.left - margin - ttW;
+        top = targetRect.top + targetRect.height / 2 - ttH / 2;
+        tt.style.setProperty('--arrow-y', (targetRect.top + targetRect.height / 2 - top) + 'px');
+      }
+
+      // 边界约束
+      left = Math.max(10, Math.min(left, vw - ttW - 10));
+      top = Math.max(10, Math.min(top, vh - ttH - 10));
+
+      tt.style.left = left + 'px';
+      tt.style.top = top + 'px';
+    }
+
+    // ====== 控制 ======
+    function next() {
+      if (current < steps.length - 1) {
+        current++;
+        render(current);
+      } else {
+        finish();
+      }
+    }
+    function prev() {
+      if (current > 0) {
+        current--;
+        render(current);
+      }
+    }
+    function finish() {
+      window.location.href = 'index.html';
+    }
+
+    // 委托点击
+    tooltip.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      if (action === 'next') next();
+      else if (action === 'prev') prev();
+    });
+
+    // 窗口缩放重定位
+    window.addEventListener('resize', () => {
+      if (current >= 0) render(current);
+    });
+
+    // 滚动重定位（虽然 body overflow hidden，但保险）
+    window.addEventListener('scroll', () => {
+      if (current >= 0) render(current);
+    }, { passive: true });
+
+    // 键盘
+    document.addEventListener('keydown', (e) => {
+      if (current < 0) return;
+      if (e.key === 'Escape') e.preventDefault();  // 禁用 ESC
+      if (e.key === 'ArrowRight' || e.key === 'Enter') next();
+      if (e.key === 'ArrowLeft' && current > 0) prev();
+    });
+
+    // 禁用右键
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // ====== 启动 ======
+    // 等字体与布局稳定
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        next();
+      });
+    });
+  </script>
+
+</body>
+</html>

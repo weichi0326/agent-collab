@@ -1,0 +1,5 @@
+# 开发/测试依赖（不随发布 python-dist 打包）。
+# 装法：venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+# 运行：venv\Scripts\python.exe -m pytest -q   （或 -m unittest discover -s tests）
+-r requirements.txt
+pytest>=8.0
