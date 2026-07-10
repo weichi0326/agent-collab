@@ -145,4 +145,4 @@ EnsurePythonVenv
 EnsureNodeModules
 VerifyProject
 
-Say "All done. To start the desktop app, run 启动开发环境.bat in this folder."
+Say "All done. To start the desktop app, run 启动应用.bat in this folder."

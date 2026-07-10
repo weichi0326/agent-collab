@@ -17,11 +17,21 @@ set EXIT_CODE=%ERRORLEVEL%
 echo.
 if %EXIT_CODE% neq 0 (
     echo [失败] 环境配置未完成,请检查上方日志。
-) else (
-    echo ==================================================
-    echo   环境配置完成!接下来双击 启动开发环境.bat 即可启动应用。
-    echo ==================================================
+    echo.
+    pause
+    exit /b %EXIT_CODE%
 )
+
+echo ==================================================
+echo   环境配置完成!
+echo ==================================================
 echo.
-pause
-exit /b %EXIT_CODE%
+choice /c YN /m "是否立即启动应用"
+if errorlevel 2 (
+    echo 稍后可双击 启动应用.bat 启动应用。
+    echo.
+    pause
+    exit /b 0
+)
+call "%~dp0启动应用.bat"
+exit /b 0
