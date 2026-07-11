@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from tools.router import router as tools_router
 from tools.llm_calling import LLM_CALLING_VERSION
+from web_reader import router as web_router
 
 # 服务鉴权令牌:由 Rust(python_manager.rs)启动时经 env 传入,前端每次请求带 X-Service-Token 头。
 # 阻止本机其它程序/恶意网页直接打 localhost:18081 调工具/装工具。
@@ -125,6 +126,7 @@ app.add_middleware(
 )
 
 app.include_router(tools_router)
+app.include_router(web_router)
 
 
 @app.get("/health")

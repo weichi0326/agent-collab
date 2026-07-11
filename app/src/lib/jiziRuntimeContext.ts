@@ -4,20 +4,18 @@ import { useModelStore } from '../stores/modelStore';
 import { useMasterAgentStore } from '../stores/masterAgentStore';
 import {
   activeSearchEntries,
-  hasConfiguredSearch,
   useSearchStore,
 } from '../stores/searchStore';
 import { useToolStore } from '../stores/toolStore';
 import { useUiStore } from '../stores/uiStore';
-import { getProvider } from './providers';
 import { getServiceStatus, listToolMeta, type ServiceStatus } from './pythonClient';
 import { BUILTIN_TOOL_TAGS } from './toolRegistry';
 import { loadJiziSkills } from './jiziSkills';
-
-function truncate(text: string, max = 80): string {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  return clean.length > max ? `${clean.slice(0, max)}...` : clean;
-}
+import { enabledJiziSkillIds } from '../stores/jiziSkillStore';
+import {
+  formatJiziObservation,
+  observeJiziProject,
+} from './jiziProjectObservation';
 
 function serviceStatusLabel(status: ServiceStatus | 'unknown'): string {
   if (status === 'running') return '正常';
@@ -55,68 +53,7 @@ async function safeToolNames(): Promise<string[]> {
 }
 
 export async function buildJiziRuntimeContext(): Promise<string> {
-  const canvasState = useCanvasStore.getState();
-  const activeCanvas = canvasState.canvases.find(
-    (canvas) => canvas.id === canvasState.activeId,
-  );
-  const agentState = useAgentStore.getState();
-  const modelState = useModelStore.getState();
-  const uiState = useUiStore.getState();
-  const searchState = useSearchStore.getState();
-  const serviceStatus = await safeServiceStatus();
-  const toolNames = await safeToolNames();
-  const skills = await loadJiziSkills();
-
-  const selectedModel = uiState.masterModel
-    ? modelState.configs
-        .find((cfg) => cfg.id === uiState.masterModel?.configId)
-        ?.models.find((model) => model.id === uiState.masterModel?.modelId)
-    : null;
-  const selectedConfig = uiState.masterModel
-    ? modelState.configs.find((cfg) => cfg.id === uiState.masterModel?.configId)
-    : null;
-
-  const enabledModelCount = modelState.configs.reduce(
-    (sum, cfg) => sum + cfg.models.filter((model) => model.enabled).length,
-    0,
-  );
-  const activeSearch = activeSearchEntries(searchState);
-  const nodes =
-    activeCanvas?.nodes
-      .map((node) => String(node.data?.label ?? '未命名节点'))
-      .slice(0, 12) ?? [];
-
-  return [
-    '【姬子可见的当前项目状态】',
-    `Python 工具服务：${serviceStatusLabel(serviceStatus)}`,
-    `当前画布：${activeCanvas ? activeCanvas.name : '无'}；节点：${
-      nodes.length > 0 ? nodes.join('、') : '无'
-    }`,
-    `已有 Agent：${
-      agentState.agents.length > 0
-        ? agentState.agents
-            .slice(0, 12)
-            .map((agent) => `${agent.name}${agent.description ? `(${truncate(agent.description, 28)})` : ''}`)
-            .join('、')
-        : '无'
-    }`,
-    `可用工具：${toolNames.slice(0, 18).join('、') || '未知'}`,
-    `可用 skill：${skills.map((skill) => skill.id).join('、') || '无'}`,
-    `模型配置：${modelState.configs.length} 个厂商配置，${enabledModelCount} 个启用模型；当前姬子模型：${
-      selectedConfig && uiState.masterModel
-        ? `${getProvider(selectedConfig.providerId)?.name ?? selectedConfig.name} / ${
-            selectedModel?.label || uiState.masterModel.modelId
-          }`
-        : '未选择'
-    }`,
-    `当前模型能力：${modelCapsLabel(selectedModel)}`,
-    `联网搜索：${
-      hasConfiguredSearch(searchState)
-        ? `已配置 ${activeSearch.length} 个可用搜索源`
-        : '未配置可用搜索源'
-    }`,
-    '回答规则：除非用户明确说外部平台，否则 Agent 默认指本项目画布里的 Agent 节点；工具默认指本项目 Python 工具。',
-  ].join('\n');
+  return formatJiziObservation(await observeJiziProject());
 }
 
 export async function buildJiziHealthReport(): Promise<string> {
@@ -128,6 +65,7 @@ export async function buildJiziHealthReport(): Promise<string> {
   const serviceStatus = await safeServiceStatus();
   const tools = await safeToolNames();
   const skills = await loadJiziSkills();
+  const enabledSkillIds = enabledJiziSkillIds(skills.map((skill) => skill.id));
 
   const enabledModelCount = modelState.configs.reduce(
     (sum, cfg) => sum + cfg.models.filter((model) => model.enabled).length,
@@ -172,7 +110,7 @@ export async function buildJiziHealthReport(): Promise<string> {
   if (activeSessionImageCount > 0 && selectedModel && !selectedModel.caps.vision) {
     issues.push('当前会话里曾经发过图片，但现在选的模型没有开启“视觉/图像”能力；追问图片时姬子不会把图片发给模型。');
   }
-  if (skills.length === 0) {
+  if (enabledSkillIds.length === 0) {
     issues.push('没有读取到姬子 skill，复杂任务会少一些做事方法。');
   }
 
@@ -195,7 +133,7 @@ export async function buildJiziHealthReport(): Promise<string> {
     `- 当前画布：${activeCanvas ? `${activeCanvas.name}，${activeCanvas.nodes.length} 个节点` : '无'}`,
     `- Agent 数量：${agentState.agents.length}`,
     `- 工具数量：${tools.length}`,
-    `- Skill 数量：${skills.length}`,
+    `- Skill 数量：${enabledSkillIds.length} 个启用 / ${skills.length} 个总计`,
     '',
     issues.length > 0
       ? `建议优先处理：\n${issues.map((issue) => `- ${issue}`).join('\n')}`

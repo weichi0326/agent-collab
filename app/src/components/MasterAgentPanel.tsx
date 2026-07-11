@@ -53,6 +53,9 @@ import {
   type JiziSearchDecision,
 } from '../lib/jiziSearchPlanner';
 import { planJiziTurnWithLLM } from '../lib/jiziTurnPlanner';
+import { observeJiziProject } from '../lib/jiziProjectObservation';
+import { enrichSearchResults } from '../lib/jiziDeepSearch';
+import { useJiziAutonomyStore } from '../stores/jiziAutonomyStore';
 import { assessSearchResultsWithLLM } from '../lib/jiziSearchQuality';
 import type { JiziTurnDecision } from '../lib/jiziTurnPlanner';
 import { generateToolWithLLM } from '../lib/toolGenerator';
@@ -195,10 +198,11 @@ function buildTurnMeta(params: {
   reason?: string;
   search: JiziSearchDecision | null;
   skills?: SelectedJiziSkill[];
+  skillWarning?: string;
   modelLabel?: string;
   imageContextLabel?: string;
 }): ChatMessageMeta {
-  const { kind, reason, search, skills = [], modelLabel, imageContextLabel } = params;
+  const { kind, reason, search, skills = [], skillWarning, modelLabel, imageContextLabel } = params;
   const flow: ChatMessageMeta['flow'] = [
     {
       label: '理解意图',
@@ -218,7 +222,7 @@ function buildTurnMeta(params: {
     {
       label: '选择技能',
       status: skills.length > 0 ? 'done' : 'skipped',
-      detail: skills.length > 0 ? skills.map((item) => item.skill.title).join('、') : '未启用额外 skill',
+      detail: skillWarning || (skills.length > 0 ? skills.map((item) => item.skill.title).join('、') : '未启用额外 skill'),
     },
     {
       label: '生成回复',
@@ -233,6 +237,7 @@ function buildTurnMeta(params: {
     modelLabel,
     imageContextLabel,
     skills: skillSummaries(skills),
+    skillWarning,
     flow,
   };
 }
@@ -629,6 +634,12 @@ function MasterAgentPanel() {
 
         if (turnPlan.kind === 'action') {
           const plannedAction = turnPlan.action;
+          useJiziAutonomyStore.getState().start(
+            targetSessionId,
+            text,
+            plannedAction.steps,
+            await observeJiziProject(),
+          );
           const notice =
             plannedAction.type === 'plan'
               ? '我已理解为一组操作计划，需要确认后执行。'
@@ -855,7 +866,11 @@ function MasterAgentPanel() {
               model: masterModel.modelId,
               signal: controller.signal,
             });
-            searchResults = quality.kept;
+            searchResults = await enrichSearchResults(
+              quality.kept,
+              undefined,
+              controller.signal,
+            );
             if (quality.droppedCount > 0) {
               plannedSearchDecision = {
                 shouldSearch: true,
@@ -911,10 +926,16 @@ function MasterAgentPanel() {
             searchResults
               .map(
                 (r, i) =>
-                  `[${i + 1}] ${r.title}\n${r.snippet}\n来源：${r.link}`,
+                  `[${i + 1}] ${r.title}\n${r.excerpt || r.snippet}\n资料层级：${
+                    r.authority === 'official'
+                      ? '官方来源'
+                      : r.authority === 'community'
+                        ? '社区来源'
+                        : '一般来源'
+                  }；读取方式：${r.contentMode === 'body' ? '网页正文' : '搜索摘要（正文读取失败）'}\n来源：${r.link}`,
               )
               .join('\n\n') +
-            '\n\n请结合以上资料作答，并在合适处标注引用编号。',
+            '\n\n请结合以上资料作答，并在合适处标注引用编号。关键事实优先使用至少两个独立来源交叉核对；只有一个来源时必须明确说明证据不足。',
         );
       }
       if (docs.length > 0) {
@@ -980,6 +1001,7 @@ function MasterAgentPanel() {
                 : { shouldSearch: false, reason: '未执行联网搜索' }
               : { shouldSearch: false, reason: '未开启或未配置联网搜索' }),
           skills: skillContext.selected,
+          skillWarning: skillContext.selectionWarning,
           modelLabel: currentModelLabel,
           imageContextLabel,
         }),

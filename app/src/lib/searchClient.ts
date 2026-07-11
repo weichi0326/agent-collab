@@ -16,6 +16,9 @@ export interface SearchResult {
   title: string;
   snippet: string;
   link: string;
+  excerpt?: string;
+  contentMode?: 'body' | 'snippet';
+  authority?: 'official' | 'community' | 'unknown';
 }
 
 // 携带失败归因的搜索错误:auth=密钥无效/未授权,quota=额度耗尽/限流,unavailable=其它不可用。

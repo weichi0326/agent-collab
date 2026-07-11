@@ -2,7 +2,11 @@ import { chat, type ChatTurn, type LLMConfig } from './llmClient';
 import { cleanJsonFence } from './masterPlanner';
 import { textValue as sharedTextValue } from './agentRunner/utils';
 import type { AgentOutputFormat } from '../stores/canvasStore';
-import type { MasterAction, MasterPlanStep } from './masterActions';
+import type {
+  MasterAction,
+  MasterAgentConfigPatch,
+  MasterPlanStep,
+} from './masterActions';
 import type { JiziSearchDecision } from './jiziSearchPlanner';
 import type { UserChoiceOption } from './jiziIntentPlanner';
 
@@ -81,6 +85,38 @@ function normalizeOutputFormat(value: unknown): AgentOutputFormat | undefined {
   return undefined;
 }
 
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return Array.from(
+    new Set(
+      value
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function normalizeAgentPatch(value: unknown): MasterAgentConfigPatch | null {
+  const item = asObject(value);
+  if (!item) return null;
+  const patch: MasterAgentConfigPatch = {};
+  for (const key of ['name', 'description', 'systemPrompt'] as const) {
+    const text = optionalTextValue(item[key]);
+    if (text) patch[key] = text;
+  }
+  const toolTags = normalizeStringArray(item.toolTags);
+  if (toolTags) patch.toolTags = toolTags;
+  if (item.modelRef === null) {
+    patch.modelRef = null;
+  } else {
+    const modelRef = asObject(item.modelRef);
+    const configId = optionalTextValue(modelRef?.configId);
+    const modelId = optionalTextValue(modelRef?.modelId);
+    if (configId && modelId) patch.modelRef = { configId, modelId };
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
 function normalizeStep(value: unknown): MasterPlanStep | null {
   const item = asObject(value);
   if (!item) return null;
@@ -121,6 +157,27 @@ function normalizeStep(value: unknown): MasterPlanStep | null {
     const label = optionalTextValue(item.label);
     const outputFormat = normalizeOutputFormat(item.outputFormat);
     return label && outputFormat ? { type, label, outputFormat } : null;
+  }
+  if (type === 'update-agent') {
+    const agentId = optionalTextValue(item.agentId);
+    const patch = normalizeAgentPatch(item.patch);
+    return agentId && patch ? { type, agentId, patch } : null;
+  }
+  if (type === 'update-node-agent-config') {
+    const canvasId = optionalTextValue(item.canvasId);
+    const nodeId = optionalTextValue(item.nodeId);
+    const patch = normalizeAgentPatch(item.patch);
+    return canvasId && nodeId && patch
+      ? { type, canvasId, nodeId, patch }
+      : null;
+  }
+  if (type === 'delete-canvas') {
+    const canvasId = optionalTextValue(item.canvasId);
+    return canvasId ? { type, canvasId } : null;
+  }
+  if (type === 'delete-tool') {
+    const toolName = optionalTextValue(item.toolName);
+    return toolName ? { type, toolName } : null;
   }
   if (type === 'run-active-canvas') {
     return { type };
@@ -263,7 +320,8 @@ function buildPlannerPrompt(
     '- 本项目内部问题、Agent 节点设计、工具是否缺失、画布操作、配置体检、普通解释，不要搜索。',
     '- 如果不确定，优先不搜索。',
     '',
-    'action steps 只允许：create-canvas、rename-active-canvas、create-agent、add-node、connect-nodes、delete-node、set-node-output-format、run-active-canvas。',
+    'action steps 只允许：create-canvas、rename-active-canvas、create-agent、add-node、connect-nodes、delete-node、set-node-output-format、update-agent、update-node-agent-config、delete-canvas、delete-tool、run-active-canvas。',
+    '修改 Agent 或节点配置必须提供稳定 agentId，或 canvasId+nodeId，并把白名单字段放入 patch。删除画布必须提供 canvasId，删除工具必须提供 toolName；禁止只靠显示名称猜测目标。',
     'outputFormat 只能是 markdown、docx、xlsx、mindmap。用户说 Word 对应 docx，Excel 对应 xlsx。',
     '不允许规划批量运行、运行全部画布；只能规划 run-active-canvas 或回到 chat 说明。',
     '',

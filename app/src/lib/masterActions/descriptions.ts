@@ -59,6 +59,16 @@ function describePlanStep(step: MasterPlanStep): string {
       return `删除节点「${step.label}」`;
     case 'set-node-output-format':
       return `把「${step.label}」输出格式改为 ${outputFormatLabel(step.outputFormat)}`;
+    case 'update-agent':
+      return `修改 Agent [${step.agentId}] 的 ${Object.keys(step.patch).join('、')}`;
+    case 'update-node-agent-config':
+      return `修改画布 [${step.canvasId}] 节点 [${step.nodeId}] 的 ${Object.keys(step.patch).join('、')}`;
+    case 'delete-canvas':
+      return `删除画布 [${step.canvasId}]，删除前需要再次确认`;
+    case 'overwrite-tool':
+      return `覆盖自定义工具「${step.payload.name}」`;
+    case 'delete-tool':
+      return `删除自定义工具「${step.toolName}」，删除前需要再次确认`;
     case 'run-active-canvas':
       return '运行当前画布';
   }

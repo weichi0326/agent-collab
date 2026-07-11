@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -88,6 +89,21 @@ class InstallDependenciesTests(unittest.TestCase):
             self.assertEqual(result, ["requests"])
             pip.assert_called_once_with(["requests"])
 
+    def test_pip_targets_persistent_user_directory(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            dynamic, "CUSTOM_DIR", Path(tmp)
+        ), patch.object(installer.subprocess, "run") as run, patch.object(
+            dynamic, "ensure_custom_runtime_paths"
+        ) as ensure_paths:
+            run.return_value.returncode = 0
+            installer._run_pip_install(["requests"])
+
+        command = run.call_args.args[0]
+        self.assertIn("--target", command)
+        target_index = command.index("--target") + 1
+        self.assertEqual(Path(command[target_index]), Path(tmp) / "site-packages")
+        ensure_paths.assert_called_once()
+
 
 class RemoveToolTests(unittest.TestCase):
     def test_rejects_builtin(self):
@@ -100,6 +116,46 @@ class RemoveToolTests(unittest.TestCase):
                 installer.remove_tool("nope-tool", {})
 
 
+class ToolSnapshotTests(unittest.TestCase):
+    def test_reads_complete_custom_tool_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            dynamic, "CUSTOM_DIR", Path(tmp)
+        ), patch.object(dynamic, "REGISTRY_PATH", Path(tmp) / "registry.json"):
+            Path(tmp, "reader_tool.py").write_text(VALID_CODE, encoding="utf-8")
+            dynamic.write_registry([
+                {
+                    "name": "reader-tool",
+                    "module": "reader_tool",
+                    "description": "读取数据",
+                    "tags": ["reader-tool"],
+                    "dependencies": ["requests"],
+                    "source": "manual",
+                }
+            ])
+
+            snapshot = dynamic.read_tool_snapshot("reader-tool")
+
+        self.assertEqual(snapshot["name"], "reader-tool")
+        self.assertEqual(snapshot["code"], VALID_CODE)
+        self.assertEqual(snapshot["dependencies"], ["requests"])
+
+    def test_snapshot_rejects_builtin_unknown_and_unsafe_module(self):
+        with self.assertRaisesRegex(ValueError, "内置工具"):
+            dynamic.read_tool_snapshot("file")
+        with patch.object(dynamic, "read_registry", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "未找到"):
+                dynamic.read_tool_snapshot("missing-tool")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            dynamic, "CUSTOM_DIR", Path(tmp)
+        ), patch.object(
+            dynamic,
+            "read_registry",
+            return_value=[{"name": "unsafe-tool", "module": "../outside"}],
+        ):
+            with self.assertRaisesRegex(ValueError, "模块路径"):
+                dynamic.read_tool_snapshot("unsafe-tool")
+
+
 class TopLevelSideEffectTests(unittest.TestCase):
     """顶层副作用硬门(check_top_level_side_effects / compile_check allow 位)。"""
 
@@ -109,6 +165,7 @@ class TopLevelSideEffectTests(unittest.TestCase):
             "import os\n"
             "import re\n"
             "import logging\n"
+            "import collections\n"
             f"{body}\n"
             "async def execute(params):\n"
             "    return {'ok': True}\n"
@@ -126,6 +183,14 @@ class TopLevelSideEffectTests(unittest.TestCase):
     def test_allows_main_guard(self):
         body = 'if __name__ == "__main__":\n    pass'
         installer.compile_check(self._code(body), "guard-tool")
+
+    def test_rejects_non_equal_or_else_main_guards(self):
+        for body in [
+            'if __name__ != "__main__":\n    os.system("echo bad")',
+            'if __name__ == "__main__":\n    pass\nelse:\n    os.system("echo bad")',
+        ]:
+            with self.assertRaisesRegex(ValueError, "顶层可执行副作用"):
+                installer.compile_check(self._code(body), "bad-guard")
 
     def test_rejects_bare_top_level_call(self):
         # 顶层裸调用(结果丢弃=纯副作用),import 时就会跑
@@ -163,11 +228,69 @@ class TopLevelSideEffectTests(unittest.TestCase):
         )
         installer.compile_check(self._code(body), "safe-tool")
 
+    def test_resolves_safe_import_aliases(self):
+        code = (
+            "import logging as log\n"
+            "logger = log.getLogger(__name__)\n"
+            "async def execute(params):\n"
+            "    return {'ok': True}\n"
+        )
+        installer.compile_check(code, "alias-tool")
+
+    def test_rejects_spoofed_safe_function_name(self):
+        code = (
+            "import attacker_helpers as evil\n"
+            "logger = evil.getLogger(__name__)\n"
+            "async def execute(params):\n"
+            "    return {'ok': True}\n"
+        )
+        with self.assertRaisesRegex(ValueError, "非白名单调用"):
+            installer.compile_check(code, "spoof-tool")
+
     def test_rejects_nested_dangerous_in_safe_wrapper(self):
         # 即便外层是白名单函数,内层嵌危险调用也要拦(递归查所有 Call)
         body = "_ = re.compile(os.system('echo hi'))"  # 嵌套危险调用
         with self.assertRaisesRegex(ValueError, "非白名单调用"):
             installer.compile_check(self._code(body), "bad-tool")
+
+    def test_rejects_definition_time_calls(self):
+        cases = [
+            "@os.system('echo decorator')\ndef helper():\n    pass",
+            "def helper(value=os.system('echo default')):\n    return value",
+            "class Bad(os.system('echo base')):\n    pass",
+            "class Bad(metaclass=os.system('echo metaclass')):\n    pass",
+            "class Bad:\n    value = os.system('echo class-body')",
+        ]
+        for body in cases:
+            with self.subTest(body=body):
+                with self.assertRaisesRegex(ValueError, "import 时调用|非白名单调用"):
+                    installer.compile_check(self._code(body), "definition-tool")
+
+    def test_rejects_safe_binding_reassignment_and_mutating_assignments(self):
+        cases = [
+            "import attacker_helpers as evil\nlogging = evil\nlogger = logging.getLogger(__name__)",
+            "os.environ['TOOL_IMPORT_SIDE_EFFECT'] = '1'",
+            "os.system = lambda *args: 0",
+        ]
+        for body in cases:
+            with self.subTest(body=body):
+                with self.assertRaisesRegex(ValueError, "覆盖受保护名称|修改属性或下标"):
+                    installer.compile_check(self._code(body), "binding-tool")
+
+    def test_rejects_dynamic_class_bases_and_metaclasses(self):
+        for body in [
+            "from attacker_helpers import Evil\nclass Bad(Evil):\n    pass",
+            "from attacker_helpers import Meta\nclass Bad(metaclass=Meta):\n    pass",
+        ]:
+            with self.subTest(body=body):
+                with self.assertRaisesRegex(ValueError, "import 时调用|类关键字"):
+                    installer.compile_check(self._code(body), "class-tool")
+
+    def test_allows_plain_exception_subclass(self):
+        installer.compile_check(
+            self._code("class ToolError(Exception):\n    pass"),
+            "exception-tool",
+        )
 
     def test_allow_flag_overrides(self):
         # 桌面 UI 明确放行时,顶层副作用不再拦(但语法/execute/体积仍校验)
@@ -183,6 +306,64 @@ class TopLevelSideEffectTests(unittest.TestCase):
         code = "import os\nMAX = 1\n"  # 无 execute
         with self.assertRaisesRegex(ValueError, "execute"):
             installer.compile_check(code, "no-exec", allow_side_effects=True)
+
+    def test_rejects_wrong_execute_signatures(self):
+        cases = [
+            "async def execute():\n    return 1\n",
+            "async def execute(data):\n    return data\n",
+            "async def execute(params={}):\n    return params\n",
+            "async def execute(params, extra):\n    return params\n",
+            "async def execute(params, *, mode='x'):\n    return params\n",
+            "async def execute(*args, **kwargs):\n    return args\n",
+        ]
+        for code in cases:
+            with self.subTest(code=code):
+                with self.assertRaisesRegex(ValueError, "execute"):
+                    installer.compile_check(code, "bad-contract")
+
+    def test_loaded_execute_must_still_be_a_coroutine(self):
+        code = (
+            "async def execute(params):\n"
+            "    return params\n"
+            "execute = lambda params: params\n"
+        )
+        installer.compile_check(code, "rebound-execute")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rebound_execute.py"
+            path.write_text(code, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "协程"):
+                installer._load_execute_isolated(path, "rebound_execute")
+
+
+class InstallToolCommitTests(unittest.TestCase):
+    def test_registry_write_failure_restores_previous_module(self):
+        async def old_execute(params):
+            return params
+
+        with tempfile.TemporaryDirectory() as tmp:
+            custom_dir = Path(tmp)
+            module_path = custom_dir / "rollback_tool.py"
+            module_path.write_text("OLD_MODULE = True\n", encoding="utf-8")
+            registry = {"rollback-tool": old_execute}
+            payload = {
+                "name": "rollback-tool",
+                "description": "rollback test",
+                "code": VALID_CODE,
+            }
+            with patch.object(dynamic, "CUSTOM_DIR", custom_dir), patch.object(
+                dynamic,
+                "read_registry",
+                return_value=[{"name": "rollback-tool", "module": "rollback_tool"}],
+            ), patch.object(
+                dynamic,
+                "write_registry",
+                side_effect=OSError("disk full"),
+            ):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    asyncio.run(installer.install_tool(payload, registry))
+
+            self.assertEqual(module_path.read_text(encoding="utf-8"), "OLD_MODULE = True\n")
+            self.assertIs(registry["rollback-tool"], old_execute)
 
 
 if __name__ == "__main__":

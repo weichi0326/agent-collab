@@ -19,11 +19,29 @@ import type {
   PendingActionView,
   PendingUserChoiceView,
 } from './types';
+import { useJiziAutonomyStore } from '../../stores/jiziAutonomyStore';
+import { AssistantMarkdown } from './AssistantMarkdown';
 
 function flowStatusLabel(status: 'done' | 'skipped' | 'pending'): string {
   if (status === 'done') return '完成';
   if (status === 'pending') return '等待';
   return '跳过';
+}
+
+function autonomyStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    observing: '观察项目',
+    planning: '制定计划',
+    'awaiting-confirmation': '等待确认',
+    'awaiting-destructive-confirmation': '等待删除确认',
+    executing: '执行中',
+    verifying: '验证结果',
+    replanning: '重新规划',
+    completed: '已完成',
+    failed: '已停止',
+    cancelled: '已取消',
+  };
+  return labels[status] ?? '未知';
 }
 
 interface MessageListProps {
@@ -59,6 +77,7 @@ export function MessageList({
   setPendingUserChoiceCustomValue,
   submitPendingUserChoice,
 }: MessageListProps) {
+  const autonomyRuns = useJiziAutonomyStore((state) => state.runs);
   if (messages.length === 0) {
     return (
       <>
@@ -109,7 +128,13 @@ export function MessageList({
                 <LoadingOutlined /> 思考中…
               </span>
             ) : (
-              <div className="master-msg__text">{m.content}</div>
+              <div className="master-msg__text">
+                {m.role === 'assistant' ? (
+                  <AssistantMarkdown content={m.content} />
+                ) : (
+                  m.content
+                )}
+              </div>
             )}
             {m.sources && m.sources.length > 0 && (
               <div className="master-msg__sources">
@@ -175,6 +200,9 @@ export function MessageList({
                     ))}
                   </div>
                 )}
+                {m.meta.skillWarning && (
+                  <div className="master-msg-meta__warning">{m.meta.skillWarning}</div>
+                )}
                 {m.meta.flow && m.meta.flow.length > 0 && (
                   <div className="master-flow">
                     {m.meta.flow.map((step, index) => (
@@ -200,11 +228,14 @@ export function MessageList({
         pendingActions.map((pendingAction) => {
           // 槽位 id:诊断动作用 incidentId(多失败互不覆盖),普通对话回落 sessionId。
           const slotId = pendingAction.incidentId ?? pendingAction.sessionId;
+          const autonomyRun = autonomyRuns[pendingAction.sessionId];
           return (
             <div key={slotId} className="master-msg master-msg--assistant">
               <div className="master-action-card">
                 <div className="master-action-card__title">
-                  我将为你{describeMasterAction(pendingAction.action)}
+                  {pendingAction.confirmationStage === 'destructive-final'
+                    ? '最终确认：以下删除操作执行后将从当前项目移除对象'
+                    : `我将为你${describeMasterAction(pendingAction.action)}`}
                 </div>
                 {pendingAction.action.type === 'plan' && (
                   <ol className="master-action-card__steps">
@@ -216,6 +247,11 @@ export function MessageList({
                 {actionRiskNotice(pendingAction.action) && (
                   <div className="master-action-card__risk">
                     {actionRiskNotice(pendingAction.action)}
+                  </div>
+                )}
+                {autonomyRun && (
+                  <div className="master-action-card__risk">
+                    自主任务阶段：{autonomyStatusLabel(autonomyRun.task.status)}；已执行 {autonomyRun.task.executedSteps}/8 步；已重新规划 {autonomyRun.task.replans}/2 次。
                   </div>
                 )}
                 {pendingAction.action.type === 'create-tool' && (
@@ -233,7 +269,11 @@ export function MessageList({
                   value={pendingAction.choice}
                   onChange={(e) => setPendingActionChoice(slotId, e.target.value)}
                 >
-                  <Radio value="confirm">确认执行</Radio>
+                  <Radio value="confirm">
+                    {pendingAction.confirmationStage === 'destructive-final'
+                      ? '确认删除'
+                      : '确认执行'}
+                  </Radio>
                   <Radio value="cancel">取消</Radio>
                   {actionAllowsCustom(pendingAction.action) && (
                     <Radio value="custom">自定义</Radio>

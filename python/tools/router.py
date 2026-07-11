@@ -118,6 +118,15 @@ def tool_audit_log(limit: int = 200) -> dict[str, Any]:
     return {"records": dynamic.read_audit_log(limit=capped)}
 
 
+@router.get("/{tool_name}/snapshot")
+def tool_snapshot(tool_name: str) -> dict[str, Any]:
+    """返回自定义工具的完整可重装快照，供已确认事务回滚使用。"""
+    try:
+        return dynamic.read_tool_snapshot(tool_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/{tool_name}/execute", response_model=ExecuteResponse)
 async def execute_tool(tool_name: str, body: ExecuteRequest) -> ExecuteResponse:
     fn = _REGISTRY.get(tool_name)

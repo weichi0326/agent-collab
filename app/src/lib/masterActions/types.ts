@@ -1,8 +1,17 @@
 ﻿import type { AgentOutputFormat } from '../../stores/canvasStore';
 import type {
+  InstallToolPayload,
   ToolMetaCapability,
   ToolMetaImplementation,
 } from '../pythonClient';
+
+export interface MasterAgentConfigPatch {
+  name?: string;
+  description?: string;
+  systemPrompt?: string;
+  toolTags?: string[];
+  modelRef?: { configId: string; modelId: string } | null;
+}
 
 export type MasterPlanStep =
   | { type: 'create-canvas'; name?: string }
@@ -21,6 +30,16 @@ export type MasterPlanStep =
       label: string;
       outputFormat: AgentOutputFormat;
     }
+  | { type: 'update-agent'; agentId: string; patch: MasterAgentConfigPatch }
+  | {
+      type: 'update-node-agent-config';
+      canvasId: string;
+      nodeId: string;
+      patch: MasterAgentConfigPatch;
+    }
+  | { type: 'delete-canvas'; canvasId: string }
+  | { type: 'overwrite-tool'; payload: InstallToolPayload }
+  | { type: 'delete-tool'; toolName: string }
   | { type: 'run-active-canvas' };
 
 export type MasterAction =

@@ -6,6 +6,11 @@ import { getMessage } from '../lib/appNotify';
 import { RunAbortedError } from '../lib/agentRunner';
 import { errorMessage } from '../lib/agentRunner/utils';
 import {
+  finalizeOrchestratorRepair,
+  recordOrchestratorToolInstalled,
+  revertOrchestratorIncident,
+} from '../lib/orchestratorBridge';
+import {
   actionCustomLabel,
   actionWithCustomValue,
 } from '../components/MasterAgentPanel/actionCustomization';
@@ -13,6 +18,8 @@ import type {
   ActionChoice,
   PendingActionView,
 } from '../components/MasterAgentPanel/types';
+import { useJiziAutonomyStore } from './jiziAutonomyStore';
+import { registerAutonomyPendingHandler } from '../lib/jiziAutonomy/pendingBridge';
 
 // 待确认动作从「会随抽屉卸载而丢失的组件内 state」上提到常驻 store,使编排层在抽屉
 // 关闭时也能挂起待确认动作;执行用的 AbortController 放模块级 Map,存活于组件卸载之外。
@@ -25,6 +32,15 @@ import type {
 // 模块级执行控制器:key=slotId。不随抽屉卸载清空(与 MasterAgentPanel 的 chat/生成
 // 请求各用各的 Map,互不影响)。
 const controllers = new Map<string, AbortController>();
+
+function containsDestructiveAction(action: PendingActionView['action']): boolean {
+  return (
+    action.type === 'plan' &&
+    action.steps.some(
+      (step) => step.type === 'delete-canvas' || step.type === 'delete-tool',
+    )
+  );
+}
 
 interface PendingActionState {
   pendingActions: Record<string, PendingActionView>;
@@ -89,6 +105,7 @@ export const usePendingActionStore = create<PendingActionState>((set, get) => ({
     const sessionId = pending.sessionId;
 
     if (selectedChoice === 'cancel') {
+      useJiziAutonomyStore.getState().cancel(sessionId);
       master.addMessageToSession(sessionId, {
         role: 'assistant',
         content: '已取消这次操作。',
@@ -98,12 +115,30 @@ export const usePendingActionStore = create<PendingActionState>((set, get) => ({
       get().reset(slotId);
       // 取消的是失败诊断的修复卡片 → 把 incident 退回「失败」重新进问题列表(item 2)。
       if (cancelledIncidentId) {
-        void import('./orchestratorStore')
-          .then((m) => m.useOrchestratorStore.getState().revertToFailed(cancelledIncidentId))
-          .catch((e) => console.error('[pendingAction] 取消后退回失败状态出错', e));
+        revertOrchestratorIncident(cancelledIncidentId);
       }
       return;
     }
+
+    if (
+      pending.confirmationStage !== 'destructive-final' &&
+      containsDestructiveAction(pending.action)
+    ) {
+      useJiziAutonomyStore.getState().dispatch(sessionId, { type: 'confirmed' });
+      set((s) => ({
+        pendingActions: {
+          ...s.pendingActions,
+          [slotId]: {
+            ...pending,
+            choice: 'confirm',
+            confirmationStage: 'destructive-final',
+          },
+        },
+      }));
+      return;
+    }
+
+    useJiziAutonomyStore.getState().dispatch(sessionId, { type: 'confirmed' });
 
     const needsCustom = selectedChoice === 'custom';
     if (needsCustom && !pending.customValue.trim()) {
@@ -128,31 +163,35 @@ export const usePendingActionStore = create<PendingActionState>((set, get) => ({
     });
     try {
       const done = await executeMasterAction(action, controller.signal);
+      await useJiziAutonomyStore
+        .getState()
+        .finishAction(sessionId, action, true);
+      const autonomyRun = useJiziAutonomyStore.getState().runs[sessionId];
       useMasterAgentStore
         .getState()
-        .updateMessage(assistantId, { content: done, status: 'done' });
+        .updateMessage(assistantId, {
+          content: autonomyRun
+            ? `${done}\n\n验证结果：${autonomyRun.task.status === 'completed' ? '已通过' : '需要继续处理'}。${autonomyRun.task.evidence.slice(-1)[0] ?? ''}`
+            : done,
+          status: 'done',
+        });
       // 工具安装成功(仅在此计数,失败会抛错走 catch 不计数)。
-      // 动态 import 避免与 orchestratorStore 形成静态循环依赖。
       if (action.type === 'create-tool') {
-        void import('./orchestratorStore')
-          .then((m) => {
-            const orchestrator = m.useOrchestratorStore.getState();
-            orchestrator.recordToolInstalled();
-            // 源自失败诊断的安装,回调编排层挂起「重跑画布」待确认。
-            if (incidentId) orchestrator.onToolInstalled(incidentId, sessionId);
-          })
-          .catch((e) => console.error('[pendingAction] 工具安装后回调编排层失败', e));
+        // 源自失败诊断的安装,回调编排层挂起「重跑画布」待确认。
+        recordOrchestratorToolInstalled(incidentId, sessionId);
       }
       // 自愈重跑跑通(全节点成功,未抛错)→ 回读结果把 incident 收尾为「已解决」。
       if (
         incidentId &&
         (action.type === 'run-active-canvas' || action.type === 'rerun-canvas-node')
       ) {
-        void import('./orchestratorStore')
-          .then((m) => m.useOrchestratorStore.getState().finalizeRepair(incidentId, true))
-          .catch((e) => console.error('[pendingAction] 重跑成功收尾 incident 失败', e));
+        finalizeOrchestratorRepair(incidentId, true);
       }
     } catch (err) {
+      const detail = errorMessage(err);
+      await useJiziAutonomyStore
+        .getState()
+        .finishAction(sessionId, action, false, detail);
       // 重跑被用户中止且已生成残留产物 → 汇入与整图运行相同的「任务已中止」清理 Modal,
       // 用较温和的措辞而非「操作失败」。
       if (err instanceof RunAbortedError && err.artifacts.length > 0) {
@@ -168,7 +207,6 @@ export const usePendingActionStore = create<PendingActionState>((set, get) => ({
             status: 'done',
           });
       } else {
-        const detail = errorMessage(err);
         useMasterAgentStore
           .getState()
           .updateMessage(assistantId, {
@@ -181,12 +219,20 @@ export const usePendingActionStore = create<PendingActionState>((set, get) => ({
         incidentId &&
         (action.type === 'run-active-canvas' || action.type === 'rerun-canvas-node')
       ) {
-        void import('./orchestratorStore')
-          .then((m) => m.useOrchestratorStore.getState().finalizeRepair(incidentId, false))
-          .catch((e) => console.error('[pendingAction] 重跑失败收尾 incident 失败', e));
+        finalizeOrchestratorRepair(incidentId, false);
       }
     } finally {
       controllers.delete(slotId);
     }
   },
 }));
+
+registerAutonomyPendingHandler((sessionId, action) => {
+  usePendingActionStore.getState().setPending(sessionId, {
+    action,
+    choice: 'confirm',
+    customValue: '',
+    sessionId,
+    confirmationStage: 'initial',
+  });
+});

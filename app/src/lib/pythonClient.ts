@@ -47,7 +47,7 @@ const HEALTH_TIMEOUT = 3000;  // 健康检查超时
 const EXECUTE_TIMEOUT = 300000; // 工具执行超时（LLM/文档任务可能需要较长时间）
 // ⚠️ 必须与 python/tools/llm_calling.py 的 LLM_CALLING_VERSION 完全一致。
 // 后台工具返回结构/行为一变就两处同步升,否则旧后台不会被识别并强制重启(见该文件注释)。
-export const EXPECTED_PYTHON_SERVICE_VERSION = '2026-07-09.tool-metadata-tags';
+export const EXPECTED_PYTHON_SERVICE_VERSION = '2026-07-11.custom-model-endpoints';
 
 export type ServiceStatus = 'starting' | 'running' | 'stopped';
 
@@ -259,6 +259,55 @@ export interface InstallToolPayload {
 export interface InstallToolResult {
   ok: boolean;
   error?: string;
+}
+
+export interface WebPageContent {
+  url: string;
+  contentType: string;
+  text: string;
+}
+
+export async function readWebPage(
+  url: string,
+  signal?: AbortSignal,
+): Promise<WebPageContent> {
+  const { signal: reqSignal, done } = createTimeoutSignal(EXECUTE_TIMEOUT, signal);
+  try {
+    const res = await pyFetch(`${BASE_URL}/web/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+      signal: reqSignal,
+    });
+    if (!res.ok) {
+      const detail = await parseHttpError(res);
+      throw new Error(detail || '网页正文读取失败');
+    }
+    return (await res.json()) as WebPageContent;
+  } finally {
+    done();
+  }
+}
+
+/** 读取自定义工具完整定义，供覆盖/删除事务在失败时恢复。 */
+export async function getToolSnapshot(
+  toolName: string,
+  signal?: AbortSignal,
+): Promise<InstallToolPayload> {
+  const { signal: reqSignal, done } = createTimeoutSignal(HEALTH_TIMEOUT, signal);
+  try {
+    const res = await pyFetch(
+      `${BASE_URL}/tools/${encodeURIComponent(toolName)}/snapshot`,
+      { signal: reqSignal },
+    );
+    if (!res.ok) {
+      const detail = await parseHttpError(res);
+      throw new Error(detail || `无法读取工具「${toolName}」的回滚快照`);
+    }
+    return (await res.json()) as InstallToolPayload;
+  } finally {
+    done();
+  }
 }
 
 /** 安装自定义工具（落盘 + 装依赖 + 注册，POST /tools/install）。 */

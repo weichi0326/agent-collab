@@ -13,6 +13,7 @@ export interface PendingActionView {
   // 该待确认动作若源自某次节点失败诊断，记录事件 id，安装成功后据此触发重跑画布。
   // 诊断动作的槽位 id 即 incidentId,使多个失败的确认卡片互不覆盖。
   incidentId?: string;
+  confirmationStage?: 'initial' | 'destructive-final';
 }
 
 export type UserChoiceSelection = 'custom' | string;

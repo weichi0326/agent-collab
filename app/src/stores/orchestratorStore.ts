@@ -5,7 +5,6 @@ import { persist } from 'zustand/middleware';
 import { createProjectStorage } from '../lib/tauriStorage';
 import { uid } from '../lib/id';
 import { chat, type LLMConfig } from '../lib/llmClient';
-import { cleanJsonFence } from '../lib/masterPlanner';
 import { generateToolWithLLM } from '../lib/toolGenerator';
 import { getProvider } from '../lib/providers';
 import { searchWithFailover } from '../lib/searchClient';
@@ -29,11 +28,30 @@ import {
 import { errorMessage } from '../lib/agentRunner/utils';
 import { PREFLIGHT_NODE_ID } from '../lib/agentRunner/constants';
 import { abortRunByCanvasId } from '../lib/runControllers';
+import { useModelStore } from './modelStore';
+import {
+  activeSearchEntries,
+  hasConfiguredSearch,
+  useSearchStore,
+} from './searchStore';
+import { usePendingActionStore } from './pendingActionStore';
+import { useCanvasStore } from './canvasStore';
+import {
+  MISSING_TOOL_TAG_MARKER,
+  requiredToolTagsForNode,
+} from '../lib/agentRunner/inputs';
+import { listTools } from '../lib/pythonClient';
+import { getToolDef } from '../lib/toolRegistry';
+import { registerOrchestratorBridge } from '../lib/orchestratorBridge';
+import {
+  parseFailureDiagnosis,
+  unknownFailureDiagnosis,
+} from '../lib/orchestrator/diagnosisParser';
 
 // 画布节点失败时上报 → 诊断(是否缺工具/库,联网搜候选库) → 生成候选工具挂起待人工确认
 // (绝不自动安装,沿用 RCE 硬底线)。安装后由 pendingActionStore 回调 onToolInstalled 触发重跑。
-// 依赖收敛: 只静态导入 uiStore/masterAgentStore (同步 handler 需要); useModelStore/useSearchStore/
-// usePendingActionStore/useCanvasStore 改动态 import (避免与 pendingActionStore 形成静态环)。
+// agentRunner、canvasStore 与 pendingActionStore 通过 orchestratorBridge 回报事件，
+// 编排层可在这里显式持有业务依赖，同时保持依赖方向单向。
 
 const NOTIF_KEY = 'orchestrator-awaiting';
 const INCIDENT_CAP = 50;
@@ -140,13 +158,6 @@ export const useOrchestratorStore = create<OrchestratorState>()(
       };
 
       const diagnose = async (incident: Incident) => {
-        // 动态 import: 打破与 pendingActionStore 的静态环; modelStore/searchStore 仅此一处用, 一并动态。
-        const [{ useModelStore }, { useSearchStore, activeSearchEntries, hasConfiguredSearch }, { usePendingActionStore }] =
-          await Promise.all([
-            import('./modelStore'),
-            import('./searchStore'),
-            import('./pendingActionStore'),
-          ]);
         const master = useMasterAgentStore.getState();
 
         const masterModel = useUiStore.getState().masterModel;
@@ -171,18 +182,7 @@ export const useOrchestratorStore = create<OrchestratorState>()(
         };
         const modelId = masterModel.modelId;
 
-        let needsTool = true;
-        let capability = '';
-        let suggestedQuery = '';
-        let reason = '';
-        let summary = '';
-        let consequence = '';
-        let fixCost = '';
-        let nextStep = '';
-        let severity = '';
-        let evidence = '';
-        let likelyCause = '';
-        let worthFixing = '';
+        let diagnosis = unknownFailureDiagnosis();
         try {
           const prompt = await buildDiagnosticPrompt(incident, llmCfg, modelId);
           const reply = await chat({
@@ -192,32 +192,33 @@ export const useOrchestratorStore = create<OrchestratorState>()(
             text: prompt.text,
             scene: 'orchestrate',
           });
-          const parsed = JSON.parse(cleanJsonFence(reply)) as Record<
-            string,
-            unknown
-          >;
-          needsTool = parsed.needsTool !== false;
-          capability = String(parsed.capability ?? '').trim();
-          suggestedQuery = String(parsed.suggestedQuery ?? '').trim();
-          reason = String(parsed.reason ?? '').trim();
-          summary = String(parsed.summary ?? '').trim();
-          consequence = String(parsed.consequence ?? '').trim();
-          fixCost = String(parsed.fixCost ?? '').trim();
-          nextStep = String(parsed.nextStep ?? '').trim();
-          severity = String(parsed.severity ?? '').trim();
-          evidence = String(parsed.evidence ?? '').trim();
-          likelyCause = String(parsed.likelyCause ?? '').trim();
-          worthFixing = String(parsed.worthFixing ?? '').trim();
+          diagnosis = parseFailureDiagnosis(reply);
         } catch {
-          // 分类解析失败时按「可能缺工具」继续,靠生成环节兜底。
+          diagnosis = unknownFailureDiagnosis();
         }
 
-        if (!needsTool) {
+        const {
+          category,
+          capability,
+          suggestedQuery,
+          reason,
+          summary,
+          consequence,
+          fixCost,
+          nextStep,
+          severity,
+          evidence,
+          likelyCause,
+          worthFixing,
+        } = diagnosis;
+
+        if (category !== 'missing-tool') {
           finishFailed(
             incident,
             [
               `诊断结果：节点「${incident.nodeLabel}」失败了。`,
               `症状：${summary || '节点运行中断，后续节点拿不到它的结果。'}`,
+              `故障分类：${category === 'unknown' ? '未知，证据不足以自动修复' : category}。`,
               `最可能病因：${likelyCause || '这次不像是缺工具，更像是节点配置、输入数据或模型调用本身出了问题。'}`,
               `判断证据：${evidence || incident.errorDetail}`,
               `影响：${consequence || '这个节点和它后面的节点暂时跑不下去。'}`,
@@ -313,16 +314,7 @@ export const useOrchestratorStore = create<OrchestratorState>()(
       // 直接自动补上标签并挂起重跑, 无需走"造新工具"重流程。返回是否已处理。
       const tryAutoGrantToolTags = async (incident: Incident): Promise<boolean> => {
         if (incident.nodeId === PREFLIGHT_NODE_ID) return false;
-        // 动态 import: 与 diagnose 一致, 规避与 pendingActionStore 的静态环。
-        const [{ useCanvasStore }, { usePendingActionStore }, inputs, { listTools }, { getToolDef }] =
-          await Promise.all([
-            import('./canvasStore'),
-            import('./pendingActionStore'),
-            import('../lib/agentRunner/inputs'),
-            import('../lib/pythonClient'),
-            import('../lib/toolRegistry'),
-          ]);
-        if (!incident.errorDetail.includes(inputs.MISSING_TOOL_TAG_MARKER)) return false;
+        if (!incident.errorDetail.includes(MISSING_TOOL_TAG_MARKER)) return false;
 
         const canvas = useCanvasStore
           .getState()
@@ -330,7 +322,7 @@ export const useOrchestratorStore = create<OrchestratorState>()(
         const node = canvas?.nodes.find((n) => n.id === incident.nodeId);
         if (!canvas || !node) return false;
 
-        const required = inputs.requiredToolTagsForNode(canvas, node);
+        const required = requiredToolTagsForNode(canvas, node);
         const rawTags = (node.data as { toolTags?: unknown }).toolTags;
         const current = Array.isArray(rawTags)
           ? rawTags.filter((t): t is string => typeof t === 'string')
@@ -524,11 +516,6 @@ export const useOrchestratorStore = create<OrchestratorState>()(
         onToolInstalled: async (incidentId, sessionId) => {
           const incident = get().incidents.find((i) => i.id === incidentId);
           if (!incident) return;
-          // 动态 import: 打破与 pendingActionStore 的静态环; canvasStore 仅此一处用, 一并动态。
-          const [{ useCanvasStore }, { usePendingActionStore }] = await Promise.all([
-            import('./canvasStore'),
-            import('./pendingActionStore'),
-          ]);
           const canvas = useCanvasStore
             .getState()
             .canvases.find((c) => c.id === incident.canvasId);
@@ -591,4 +578,19 @@ export const useOrchestratorStore = create<OrchestratorState>()(
     },
   ),
 );
+
+registerOrchestratorBridge({
+  reportNodeFailure: (input) =>
+    useOrchestratorStore.getState().reportNodeFailure(input),
+  clearDiagnosedForRun: (runId) =>
+    useOrchestratorStore.getState().clearDiagnosedForRun(runId),
+  revertToFailed: (incidentId) =>
+    useOrchestratorStore.getState().revertToFailed(incidentId),
+  recordToolInstalled: () =>
+    useOrchestratorStore.getState().recordToolInstalled(),
+  onToolInstalled: (incidentId, sessionId) =>
+    useOrchestratorStore.getState().onToolInstalled(incidentId, sessionId),
+  finalizeRepair: (incidentId, ok) =>
+    useOrchestratorStore.getState().finalizeRepair(incidentId, ok),
+});
 

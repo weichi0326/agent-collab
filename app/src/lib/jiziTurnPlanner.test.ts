@@ -27,6 +27,77 @@ describe('parseJiziTurnDecision', () => {
     }
   });
 
+  it('parses stable-id Agent, node, canvas, and tool actions', () => {
+    const decision = parseJiziTurnDecision(
+      JSON.stringify({
+        kind: 'action',
+        reason: '用户要求修改并清理项目对象',
+        steps: [
+          {
+            type: 'update-agent',
+            agentId: 'agent-1',
+            patch: {
+              name: '研究助手',
+              systemPrompt: '先核对来源再回答',
+              toolTags: ['search', 'file'],
+              ignored: 'not-allowed',
+            },
+          },
+          {
+            type: 'update-node-agent-config',
+            canvasId: 'canvas-1',
+            nodeId: 'node-1',
+            patch: { description: '处理研究任务' },
+          },
+          { type: 'delete-canvas', canvasId: 'canvas-old' },
+          { type: 'delete-tool', toolName: 'legacy-reader' },
+        ],
+        search: { shouldSearch: false, reason: '' },
+      }),
+      opts,
+    );
+
+    expect(decision.kind).toBe('action');
+    if (decision.kind === 'action') {
+      expect(decision.action.steps).toEqual([
+        {
+          type: 'update-agent',
+          agentId: 'agent-1',
+          patch: {
+            name: '研究助手',
+            systemPrompt: '先核对来源再回答',
+            toolTags: ['search', 'file'],
+          },
+        },
+        {
+          type: 'update-node-agent-config',
+          canvasId: 'canvas-1',
+          nodeId: 'node-1',
+          patch: { description: '处理研究任务' },
+        },
+        { type: 'delete-canvas', canvasId: 'canvas-old' },
+        { type: 'delete-tool', toolName: 'legacy-reader' },
+      ]);
+    }
+  });
+
+  it('rejects name-only destructive targets', () => {
+    const decision = parseJiziTurnDecision(
+      JSON.stringify({
+        kind: 'action',
+        reason: '删除旧对象',
+        steps: [
+          { type: 'delete-canvas', name: '旧画布' },
+          { type: 'delete-tool', name: '旧工具' },
+        ],
+        search: { shouldSearch: false, reason: '' },
+      }),
+      opts,
+    );
+
+    expect(decision.kind).toBe('chat');
+  });
+
   it('parses chat search decisions', () => {
     const decision = parseJiziTurnDecision(
       JSON.stringify({

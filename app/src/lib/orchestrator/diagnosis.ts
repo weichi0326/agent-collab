@@ -91,6 +91,7 @@ export async function buildDiagnosticPrompt(
     cfg,
     model,
     signal,
+    { requiredIds: ['failure-diagnosis'], autoSelect: false },
   );
   return {
     system: [
@@ -100,11 +101,12 @@ export async function buildDiagnosticPrompt(
       .filter(Boolean)
       .join('\n\n'),
     text: [
-      '一个多 Agent 协同工具的画布节点运行失败了。请判断这次失败是否因为缺少某种工具/Python 库能力导致（例如需要读取某种文件格式、需要某个第三方库）。',
+      '一个多 Agent 协同工具的画布节点运行失败了。请根据报错证据分类，不要为了修复而假定缺少工具。',
       `节点名称：${incident.nodeLabel}`,
       `报错信息：${incident.errorDetail}`,
       '只输出 JSON，字段：',
-      '- needsTool: boolean，是否可通过新增一个工具/安装库来修复。',
+      '- category: string，只能填 missing-tool、tool-parameters、node-configuration、missing-input、model-call、network-or-service 或 unknown。',
+      '- confidence: number，0 到 1 之间；没有直接证据时低于 0.7。',
       '- capability: string，缺失的能力简述（中文，如「读取 .xyz 格式文件」）。',
       '- suggestedQuery: string，用于联网搜索现成 Python 库的英文查询词。',
       '- reason: string，一句话判断理由（中文）。',
@@ -113,7 +115,7 @@ export async function buildDiagnosticPrompt(
       '- fixCost: string，修复代价，填“低”“中”或“高”。',
       '- nextStep: string，下一步建议。',
       '- severity: string，严重程度，填“低”“中”或“高”。',
-      '- evidence: string，判断依据，指出你从报错里看到了什么证据。',
+      '- evidence: string，判断依据，指出你从报错里看到了什么直接证据；category 为 missing-tool 时必须非空。',
       '- likelyCause: string，最可能病因，用大白话说明。',
       '- worthFixing: string，值不值得修，填“值得马上修”“可以稍后修”或“不建议自动修”。',
     ].join('\n'),
