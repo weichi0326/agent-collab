@@ -2,8 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DrawerModeSwitch,
-  masterDrawerClassName,
 } from './MasterAgentDrawer';
+import { masterDrawerClassName } from './masterDrawerDisplay';
 
 vi.mock('./MasterAgentPanel', () => ({
   default: () => <div>chat</div>,

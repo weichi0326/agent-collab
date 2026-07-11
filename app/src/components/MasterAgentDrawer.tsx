@@ -4,20 +4,12 @@ import { RobotOutlined, UpOutlined, DownOutlined } from '@ant-design/icons';
 import MasterAgentPanel from './MasterAgentPanel';
 import MasterSessionRail from './MasterSessionRail';
 import MasterConfigModal from './MasterConfigModal';
+import { masterDrawerClassName } from './masterDrawerDisplay';
 import { useMasterAgentStore } from '../stores/masterAgentStore';
 import { useUiStore } from '../stores/uiStore';
 
 // 收起超过该时长后卸载抽屉内容,释放会话/消息占用的内存与渲染;再次展开即重新挂载。
 const UNMOUNT_DELAY_MS = 5 * 60 * 1000;
-
-export function masterDrawerClassName(
-  expanded: boolean,
-  fullscreen: boolean,
-): string {
-  return expanded && fullscreen
-    ? 'master-drawer master-drawer--fullscreen'
-    : 'master-drawer';
-}
 
 export function DrawerModeSwitch({
   fullscreen,
