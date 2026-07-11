@@ -4,7 +4,7 @@ import { useMasterAgentStore } from './masterAgentStore';
 import { useAbortedRunStore } from './abortedRunStore';
 import { getMessage } from '../lib/appNotify';
 import { RunAbortedError } from '../lib/agentRunner';
-import { errorMessage } from '../lib/agentRunner/utils';
+import { errorMessage, isAbortError } from '../lib/agentRunner/utils';
 import {
   finalizeOrchestratorRepair,
   recordOrchestratorToolInstalled,
@@ -189,9 +189,17 @@ export const usePendingActionStore = create<PendingActionState>((set, get) => ({
       }
     } catch (err) {
       const detail = errorMessage(err);
-      await useJiziAutonomyStore
-        .getState()
-        .finishAction(sessionId, action, false, detail);
+      const aborted =
+        controller.signal.aborted ||
+        err instanceof RunAbortedError ||
+        isAbortError(err);
+      if (aborted) {
+        useJiziAutonomyStore.getState().cancel(sessionId);
+      } else {
+        await useJiziAutonomyStore
+          .getState()
+          .finishAction(sessionId, action, false, detail);
+      }
       // 重跑被用户中止且已生成残留产物 → 汇入与整图运行相同的「任务已中止」清理 Modal,
       // 用较温和的措辞而非「操作失败」。
       if (err instanceof RunAbortedError && err.artifacts.length > 0) {
@@ -200,6 +208,13 @@ export const usePendingActionStore = create<PendingActionState>((set, get) => ({
           artifacts: err.artifacts,
           runId: err.runId,
         });
+        useMasterAgentStore
+          .getState()
+          .updateMessage(assistantId, {
+            content: '已中止本次操作。',
+            status: 'done',
+          });
+      } else if (aborted) {
         useMasterAgentStore
           .getState()
           .updateMessage(assistantId, {

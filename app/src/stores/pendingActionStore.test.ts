@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeMasterAction } from '../lib/masterActions';
 import { useMasterAgentStore } from './masterAgentStore';
 import { usePendingActionStore } from './pendingActionStore';
+import { createJiziTask } from '../lib/jiziAutonomy/reducer';
+import { useJiziAutonomyStore } from './jiziAutonomyStore';
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {
@@ -25,6 +27,7 @@ describe('pending destructive confirmation', () => {
     storage.clear();
     mockedExecute.mockClear();
     usePendingActionStore.setState({ pendingActions: {} });
+    useJiziAutonomyStore.setState({ runs: {} });
   });
 
   it('requires two confirmations before executing deletion', async () => {
@@ -52,5 +55,38 @@ describe('pending destructive confirmation', () => {
 
     expect(mockedExecute).toHaveBeenCalledTimes(1);
     expect(usePendingActionStore.getState().pendingActions[sessionId]).toBeUndefined();
+  });
+
+  it('cancels autonomy instead of replanning when execution is aborted', async () => {
+    const sessionId = useMasterAgentStore.getState().newSession();
+    const action = {
+      type: 'plan' as const,
+      steps: [{ type: 'create-canvas' as const, name: '研究画布' }],
+    };
+    useJiziAutonomyStore.setState({
+      runs: {
+        [sessionId]: {
+          task: { ...createJiziTask('创建研究画布'), status: 'executing' },
+          steps: action.steps,
+        },
+      },
+    });
+    usePendingActionStore.getState().setPending(sessionId, {
+      action,
+      choice: 'confirm',
+      customValue: '',
+      sessionId,
+      confirmationStage: 'initial',
+    });
+    mockedExecute.mockRejectedValueOnce(new DOMException('已取消', 'AbortError'));
+
+    await usePendingActionStore.getState().runPending(sessionId, 'confirm');
+
+    expect(useJiziAutonomyStore.getState().runs[sessionId].task.status).toBe(
+      'cancelled',
+    );
+    expect(
+      usePendingActionStore.getState().pendingActions[sessionId],
+    ).toBeUndefined();
   });
 });

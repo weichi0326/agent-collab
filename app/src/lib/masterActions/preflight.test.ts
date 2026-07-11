@@ -160,4 +160,91 @@ describe('preflightMasterPlan', () => {
     expect(result.ok).toBe(false);
     expect(result.issues.some((issue) => issue.code === 'step-limit')).toBe(true);
   });
+
+  it('rejects duplicate canvas and agent names before execution', () => {
+    const result = preflightMasterPlan(
+      [
+        { type: 'create-canvas', name: observation.canvases[0].name },
+        { type: 'create-agent', name: observation.agents[0].name },
+      ],
+      observation,
+    );
+
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['canvas-name-duplicate', 'agent-name-duplicate']),
+    );
+  });
+
+  it('rejects active-canvas mutations when no editable canvas exists', () => {
+    const missing = preflightMasterPlan(
+      [{ type: 'rename-active-canvas', name: '新名称' }],
+      { ...observation, activeCanvasId: null, activeCanvas: null },
+    );
+    const readOnlyObservation: JiziProjectObservation = {
+      ...observation,
+      canvases: observation.canvases.map((canvas) => ({
+        ...canvas,
+        readOnly: true,
+      })),
+    };
+    const readOnly = preflightMasterPlan(
+      [
+        { type: 'add-node', label: '新节点' },
+        { type: 'delete-node', label: '研究' },
+        { type: 'set-node-output-format', label: '研究', outputFormat: 'markdown' },
+      ],
+      readOnlyObservation,
+    );
+
+    expect(missing.issues.some((issue) => issue.code === 'active-canvas-missing')).toBe(true);
+    expect(readOnly.issues.filter((issue) => issue.code === 'canvas-read-only')).toHaveLength(3);
+  });
+
+  it('rejects unresolved and duplicate connections', () => {
+    const withExistingEdge: JiziProjectObservation = {
+      ...observation,
+      canvases: observation.canvases.map((canvas) => ({
+        ...canvas,
+        nodes: [
+          ...canvas.nodes,
+          { ...canvas.nodes[0], id: 'node-2', label: '撰写' },
+        ],
+        edges: [{ id: 'edge-1', sourceId: 'node-1', targetId: 'node-2' }],
+      })),
+    };
+    const result = preflightMasterPlan(
+      [
+        { type: 'connect-nodes', source: '不存在', target: '撰写' },
+        { type: 'connect-nodes', source: '研究', target: '撰写' },
+      ],
+      withExistingEdge,
+    );
+
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['node-not-found', 'connection-duplicate']),
+    );
+  });
+
+  it('rejects running an absent, read-only, or already-running canvas', () => {
+    const absent = preflightMasterPlan(
+      [{ type: 'run-active-canvas' }],
+      { ...observation, activeCanvasId: null, activeCanvas: null },
+    );
+    const blocked = preflightMasterPlan(
+      [{ type: 'run-active-canvas' }],
+      {
+        ...observation,
+        canvases: observation.canvases.map((canvas) => ({
+          ...canvas,
+          readOnly: true,
+          run: { status: 'running', message: '' },
+        })),
+      },
+    );
+
+    expect(absent.issues.some((issue) => issue.code === 'active-canvas-missing')).toBe(true);
+    expect(blocked.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['canvas-read-only', 'canvas-running']),
+    );
+  });
 });

@@ -57,29 +57,36 @@ export const useJiziAutonomyStore = create<JiziAutonomyState>((set, get) => ({
   finishAction: async (sessionId, action, ok, error) => {
     const run = get().runs[sessionId];
     if (!run || action.type !== 'plan') return;
+    let observation: JiziProjectObservation | undefined;
     if (!ok) {
       get().dispatch(sessionId, {
         type: 'step-failed',
         retryable: true,
         error: error || '计划执行失败',
       });
-      return;
+    } else {
+      get().dispatch(sessionId, {
+        type: 'step-succeeded',
+        count: run.steps.length,
+        evidence: `事务已执行 ${run.steps.length} 个步骤。`,
+      });
+      observation = await observeJiziProject();
+      const checks = run.steps.map((step) => verifyPlanStep(step, observation!));
+      get().dispatch(sessionId, {
+        type: 'verified',
+        ok: checks.every((check) => check.ok),
+        evidence: checks.map((check) => check.evidence).join('；'),
+      });
     }
-    get().dispatch(sessionId, {
-      type: 'step-succeeded',
-      count: run.steps.length,
-      evidence: `事务已执行 ${run.steps.length} 个步骤。`,
-    });
-    const observation = await observeJiziProject();
-    const checks = run.steps.map((step) => verifyPlanStep(step, observation));
-    get().dispatch(sessionId, {
-      type: 'verified',
-      ok: checks.every((check) => check.ok),
-      evidence: checks.map((check) => check.evidence).join('；'),
-    });
-    const current = get().runs[sessionId];
-    if (current?.task.status !== 'replanning') return;
+    if (get().runs[sessionId]?.task.status !== 'replanning') return;
     try {
+      observation ??= await observeJiziProject();
+      get().dispatch(sessionId, {
+        type: 'observed',
+        fingerprint: fingerprintJiziObservation(observation),
+      });
+      const current = get().runs[sessionId];
+      if (current?.task.status !== 'planning') return;
       const selected = useUiStore.getState().masterModel;
       const config = selected
         ? useModelStore.getState().configs.find((item) => item.id === selected.configId)
@@ -99,7 +106,9 @@ export const useJiziAutonomyStore = create<JiziAutonomyState>((set, get) => ({
         },
       );
       if (decision.kind !== 'action') throw new Error('重新规划没有产生可执行计划');
-      const nextTask = reduceJiziTask(current.task, {
+      const latest = get().runs[sessionId];
+      if (latest?.task.status !== 'planning') return;
+      const nextTask = reduceJiziTask(latest.task, {
         type: 'plan-ready',
         destructive: decision.action.steps.some(
           (step) => step.type === 'delete-canvas' || step.type === 'delete-tool',
