@@ -1,32 +1,31 @@
 ---
-name: workflow-planner
-description: Plan canvas workflows for the multi-agent desktop app. Use when the user wants to design, explain, or improve a canvas made of Agent nodes, tool nodes, gate nodes, and data flow connections.
+index: "workflow-planner"
+title: "工作流规划"
+description: "当用户想设计、解释或改进多 Agent 画布流程时使用，帮助把目标拆成节点、数据流和人工配置项。"
+category: "workflow"
+capabilities: "拆解任务目标 | 规划画布节点 | 设计数据流 | 标出人工配置"
 ---
 
-# Workflow Planner
+# 工作流规划
 
-Use this skill to help users turn a vague goal into a runnable canvas workflow.
+## 具体能力
 
-## Workflow
+- 拆解任务目标
+- 规划画布节点
+- 设计数据流
+- 标出人工配置
 
-1. Restate the user's goal in plain language.
-2. Identify the needed inputs: documents, spreadsheets, screenshots, URLs, or manual text.
-3. Propose a small number of Agent nodes, each with one clear job.
-4. Explain how data should flow between nodes.
-5. Add gate nodes only when the workflow truly needs branching or fallback.
-6. Name expected outputs for each important node.
-7. Point out what the user must configure manually, such as model keys or file paths.
+## 做事方法
 
-## Default Patterns
+先用一句话复述用户目标，再识别输入来源，例如文档、表格、截图、网址或手动文本。把目标拆成少量职责单一的 Agent 节点，并说明每个节点读取什么、产出什么、输出给谁。
 
-- Requirement document -> Requirement analyst -> Test case generator -> Bug report generator.
-- Excel with comments/images -> Rich input reader -> Visual reasoning Agent -> Test case generator.
-- Risky or uncertain step -> Main branch plus NOR fallback branch.
-- Multiple alternative analyzers -> OR gate -> downstream summary Agent.
+规划数据流时优先保持线性清晰；只有确实存在分支、兜底或多路择优时，才建议加入门控节点。对不确定、易失败或依赖外部资源的步骤，明确是否需要备用路线。
 
-## Output Style
+常见模式：
 
-- Prefer a short ordered list.
-- Use a table when comparing node choices.
-- Do not claim the canvas already exists unless the app has confirmed creation.
-- If information is missing, ask for the smallest useful missing detail.
+- 需求文档：需求分析 Agent -> 测试用例 Agent -> 缺陷报告 Agent。
+- 含批注或图片的表格：富输入读取 -> 视觉/结构分析 Agent -> 用例生成 Agent。
+- 高风险步骤：主流程 + NOR 兜底分支。
+- 多种分析路线：多个分析 Agent -> OR 门控 -> 汇总 Agent。
+
+输出时给出节点清单、连接关系和需要用户手动配置的内容，例如模型、密钥、文件路径或工具权限。不要声称画布已经创建，除非应用已经确认执行了创建动作。

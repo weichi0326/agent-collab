@@ -62,6 +62,7 @@ const pyAllow = new Set(
 const csp: string = tauriConf.app.security.csp;
 const connectSeg = csp.split(';').find((s: string) => s.includes('connect-src')) ?? '';
 const connectHosts = new Set(capture(connectSeg, /(https?:\/\/[^\s]+)/g).map(toHost));
+const connectAllowsAllHttps = /(?:^|\s)https:(?:\s|$)/.test(connectSeg);
 
 interface HttpPerm {
   identifier: string;
@@ -72,6 +73,7 @@ const httpPerm = (capabilities.permissions as unknown[]).find(
     typeof p === 'object' && p !== null && (p as HttpPerm).identifier === 'http:default',
 );
 const capHosts = new Set((httpPerm?.allow ?? []).map((a) => toHost(a.url)));
+const capAllowsAllHttps = capHosts.has('*');
 
 describe('契约:解析非空守卫(防空集互等的假通过)', () => {
   it('各源都解析出预期数量', () => {
@@ -101,7 +103,11 @@ describe('契约:服务版本握手一致', () => {
 
 describe('契约:Tauri 两份允许域名 lockstep', () => {
   it('connect-src(prod) 与 capabilities http allow 的 host 集合相同', () => {
-    expect([...connectHosts].sort()).toEqual([...capHosts].sort());
+    expect(connectAllowsAllHttps).toBe(true);
+    expect(capAllowsAllHttps).toBe(true);
+    expect([...connectHosts].sort()).toEqual(
+      [...capHosts].filter((host) => host !== '*').sort(),
+    );
   });
 });
 
@@ -111,7 +117,7 @@ describe('契约:前端会请求的域名都被放行', () => {
     expect(connectHosts.has(h)).toBe(true);
   });
   it.each(feAll)('%s 在 capabilities 中', (h) => {
-    expect(capHosts.has(h)).toBe(true);
+    expect(capAllowsAllHttps || capHosts.has(h)).toBe(true);
   });
   it.each([...feLlmHosts])('LLM 域名 %s 在 Python _ALLOWED_DOMAINS 中', (h) => {
     expect(pyAllow.has(h)).toBe(true);

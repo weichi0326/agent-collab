@@ -1,5 +1,7 @@
 import type { Node } from '@xyflow/react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import {
+  canvasLimitMessage,
   useCanvasStore,
   type AgentNodeData,
   type AgentRunStatus,
@@ -50,12 +52,52 @@ import { callNodeModel } from './agentRunner/modelCalls';
 import { persistOutput } from './agentRunner/outputWriter';
 import { isNodeReady, gatePassed } from './agentRunner/gateLogic';
 import { nodeLabel } from './agentNode';
+import { reportNodeFailureToOrchestrator } from './orchestratorBridge';
 
 export { RunAbortedError } from './agentRunner/types';
 export type {
   RunArtifact,
   RunCanvasResult,
 } from './agentRunner/types';
+
+let activeNativeTasks = 0;
+let nativeTaskActivation: Promise<void> = Promise.resolve();
+let nativeTaskTransitions: Promise<void> = Promise.resolve();
+
+async function setNativeTaskRunning(running: boolean): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke('set_task_running', { running });
+  } catch {
+    // 关闭保护同步失败不应改变任务执行结果。
+  }
+}
+
+function queueNativeTaskState(running: boolean): Promise<void> {
+  nativeTaskTransitions = nativeTaskTransitions.then(() =>
+    setNativeTaskRunning(running),
+  );
+  return nativeTaskTransitions;
+}
+
+async function withNativeTaskGuard<T>(task: () => Promise<T>): Promise<T> {
+  activeNativeTasks += 1;
+  if (activeNativeTasks === 1) {
+    nativeTaskActivation = queueNativeTaskState(true);
+  }
+  await nativeTaskActivation;
+  try {
+    return await task();
+  } finally {
+    activeNativeTasks = Math.max(0, activeNativeTasks - 1);
+    if (activeNativeTasks === 0) {
+      await nativeTaskActivation;
+      if (activeNativeTasks === 0) {
+        await queueNativeTaskState(false);
+      }
+    }
+  }
+}
 
 // 并发运行名额信号量:一个名额 = 一次「正在实际执行节点」的运行。计时节点倒计时期间会
 // 主动交还名额(见 runGraph 计时分支),使等计时的运行不占并发名额;计时结束需重新申领,
@@ -163,15 +205,24 @@ export async function removeRunArtifacts(
   return Array.isArray(result.deleted) ? result.deleted.length : paths.length;
 }
 
-export async function runCanvas(canvasId: string, signal?: AbortSignal): Promise<RunCanvasResult> {
-  await ensureCompatiblePythonService();
+export function runCanvas(canvasId: string, signal?: AbortSignal): Promise<RunCanvasResult> {
+  return withNativeTaskGuard(() => runCanvasInternal(canvasId, signal));
+}
 
-  const sourceCanvas = useCanvasStore
-    .getState()
-    .canvases.find((c) => c.id === canvasId);
+async function runCanvasInternal(
+  canvasId: string,
+  signal?: AbortSignal,
+): Promise<RunCanvasResult> {
+  const canvasState = useCanvasStore.getState();
+  const sourceCanvas = canvasState.canvases.find((c) => c.id === canvasId);
   if (!sourceCanvas) throw new Error('当前画布不存在。');
   if (sourceCanvas.readOnly) throw new Error('只读运行画布不可再次运行。');
   if (sourceCanvas.nodes.length === 0) throw new Error('画布为空，请先添加节点。');
+  if (canvasState.canvases.length >= canvasState.maxCanvases) {
+    throw new Error(`${canvasLimitMessage(canvasState.maxCanvases)}，无法创建运行副本。`);
+  }
+
+  await ensureCompatiblePythonService();
 
   // 并发运行名额守卫(原子:检查+占用同步完成,无 await 间隙):整图运行入口满即拒绝。
   // 手动运行按钮虽一次只跑一个,姬子批量/未来多路径可能并发,此处是唯一入口的统一护栏。
@@ -190,22 +241,22 @@ export async function runCanvas(canvasId: string, signal?: AbortSignal): Promise
     } catch (err) {
       // 运行前工具预检失败(如缺少某文件读取工具)也上报编排层,交姬子判断能否补齐。
       const detail = errorMessage(err);
-      void import('../stores/orchestratorStore')
-        .then((m) => {
-          const orchestrator = m.useOrchestratorStore.getState();
-          if (!orchestrator.enabled) return;
-          orchestrator.reportNodeFailure({
-            canvasId,
-            nodeId: PREFLIGHT_NODE_ID,
-            nodeLabel: sourceCanvas.name,
-            errorDetail: detail,
-          });
-        })
-        .catch((e) => console.error('[agentRunner] 预检失败上报编排层异常', e));
+      reportNodeFailureToOrchestrator({
+        canvasId,
+        nodeId: PREFLIGHT_NODE_ID,
+        nodeLabel: sourceCanvas.name,
+        errorDetail: detail,
+      });
       throw err;
     }
     const run = useCanvasStore.getState().createRun(sourceCanvas.id);
-    if (!run) throw new Error('创建运行副本失败。');
+    if (!run) {
+      const state = useCanvasStore.getState();
+      if (state.canvases.length >= state.maxCanvases) {
+        throw new Error(`${canvasLimitMessage(state.maxCanvases)}，无法创建运行副本。`);
+      }
+      throw new Error('创建运行副本失败。');
+    }
 
     const canvas = useCanvasStore
       .getState()
@@ -606,22 +657,16 @@ async function runGraph({
         // 这里再调一次扫本节点的直接下游(防 readyHas 漏标),readyHas 防重复 push。
         onNodeSettled(node);
         // 把失败上报给常驻编排层(姬子诊断→半自主造工具)。fire-and-forget,不阻塞
-        // 也不影响现有失败隔离;动态 import 规避与编排层的静态循环依赖。上报源画布 id
+        // 也不影响现有失败隔离;通过事件桥上报源画布 id
         // (sourceCanvasId,用于整图回落)+ 运行副本定位(canvas.id/runId,用于就地重跑失败子节点)。
-        void import('../stores/orchestratorStore')
-          .then((m) => {
-            const orchestrator = m.useOrchestratorStore.getState();
-            if (!orchestrator.enabled) return;
-            orchestrator.reportNodeFailure({
-              canvasId: sourceCanvasId,
-              nodeId: node.id,
-              nodeLabel: nodeLabel(node),
-              errorDetail: detail,
-              runTabId: canvas.id,
-              runId,
-            });
-          })
-          .catch((e) => console.error('[agentRunner] 节点失败上报编排层异常', e));
+        reportNodeFailureToOrchestrator({
+          canvasId: sourceCanvasId,
+          nodeId: node.id,
+          nodeLabel: nodeLabel(node),
+          errorDetail: detail,
+          runTabId: canvas.id,
+          runId,
+        });
       } finally {
         if (!aborted && status.get(node.id) !== 'running') {
           running--;
@@ -670,7 +715,18 @@ async function runGraph({
 // 就地重跑「失败节点 + 其下游」: 在既有只读运行副本 tab 上,把已成功上游节点的输出
 // 从磁盘 data.json 恢复进内存,只调度失败子图重跑(上游不重算)。无法就地重跑时抛
 // RerunUnavailableError,由上层回落整图重跑。
-export async function rerunCanvasNode(
+export function rerunCanvasNode(
+  runTabId: string,
+  nodeId: string,
+  sourceCanvasId: string,
+  signal?: AbortSignal,
+): Promise<RunCanvasResult> {
+  return withNativeTaskGuard(() =>
+    rerunCanvasNodeInternal(runTabId, nodeId, sourceCanvasId, signal),
+  );
+}
+
+async function rerunCanvasNodeInternal(
   runTabId: string,
   nodeId: string,
   sourceCanvasId: string,

@@ -1,5 +1,11 @@
-import { useCallback, useMemo, useState } from 'react';
-import { App, Button, Input, Modal, Segmented, Tag, Tooltip } from 'antd';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Alert, App, Button, Checkbox, Input, Modal, Segmented, Select, Tag, Tooltip } from 'antd';
+import {
+  CloudUploadOutlined,
+  FileMarkdownOutlined,
+  SafetyCertificateOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import type { LLMConfig } from '../../lib/llmClient';
@@ -8,8 +14,7 @@ import { useModelStore } from '../../stores/modelStore';
 import { useUiStore } from '../../stores/uiStore';
 import {
   isBuiltinSkill,
-  overwriteJiziSkill,
-  saveJiziSkill,
+  writeJiziSkills,
   type JiziSkill,
 } from '../../lib/jiziSkills';
 import {
@@ -18,6 +23,15 @@ import {
   deepCompareSkill,
   type SkillCandidate,
 } from '../../lib/jiziSkillImport';
+import {
+  assertSkillTextLimits,
+  generatedSkillId,
+  normalizeSkillId,
+  SKILL_DESCRIPTION_CHAR_LIMIT,
+  SKILL_INSTRUCTION_CHAR_LIMIT,
+  SKILL_TITLE_CHAR_LIMIT,
+  sliceUnicode,
+} from '../../lib/jiziSkillFormat';
 
 type ImportMode = 'rewrite' | 'preserve';
 
@@ -25,26 +39,16 @@ interface ImportSkillModalProps {
   open: boolean;
   onClose: () => void;
   skills: JiziSkill[];
-  onImported: () => void;
+  onImported: () => void | Promise<void>;
 }
 
 type ConflictResolution = 'skip' | 'overwrite' | 'rename';
 
 interface CandidateRow extends SkillCandidate {
-  id: string; // 用户可编辑的 skill id(初始 = modelName)
+  id: string; // 用户可编辑的索引
+  selected: boolean;
   conflict: ConflictResolution;
-  isBuiltinConflict: boolean;
   preserveRaw: boolean;
-}
-
-function normalizeSkillId(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 48);
 }
 
 export function ImportSkillModal({
@@ -62,22 +66,26 @@ export function ImportSkillModal({
   const [stage, setStage] = useState<'idle' | 'confirm'>('idle');
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<ImportMode>('rewrite');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState('');
+  const analysisController = useRef<AbortController | null>(null);
 
   const resolveLlmCfg = useCallback((): {
     cfg: LLMConfig;
     modelId: string;
   } | null => {
     if (!masterModel) {
-      message.warning('请先在右下角选择对话模型');
+      setAnalysisError('尚未选择姬子对话模型，请先在右下角选择模型后重试。');
       return null;
     }
     const cfg = configs.find((c) => c.id === masterModel.configId);
     if (!cfg) {
-      message.warning('所选模型已失效，请重新选择');
+      setAnalysisError('当前选择的模型配置已经失效，请重新选择模型。');
       return null;
     }
     if (!cfg.apiKey) {
-      message.warning('所选模型未配置密钥，请到「模型配置」补全');
+      setAnalysisError('当前模型没有配置密钥，请先到「模型配置」补全。');
       return null;
     }
     const preset = getProvider(cfg.providerId);
@@ -87,15 +95,20 @@ export function ImportSkillModal({
       apiKey: cfg.apiKey,
     };
     return { cfg: llmCfg, modelId: masterModel.modelId };
-  }, [masterModel, configs, message]);
+  }, [masterModel, configs]);
 
   const reset = () => {
     setRows([]);
     setStage('idle');
     setAnalyzing(false);
+    setSaving(false);
+    setActiveIndex(0);
+    setAnalysisError(null);
+    setAnalysisProgress('');
   };
 
   const handleSelectFiles = async () => {
+    setAnalysisError(null);
     const llm = resolveLlmCfg();
     if (!llm) return;
     const selected = await openDialog({
@@ -112,13 +125,16 @@ export function ImportSkillModal({
     setAnalyzing(true);
     setStage('idle');
     setRows([]);
+    setAnalysisProgress('正在读取文件...');
+    const controller = new AbortController();
+    analysisController.current = controller;
     try {
       const fileContents = await Promise.all(
         paths.map((p) => invoke<string>('read_text_file', { path: p })),
       );
       const existingSkills = skills.map((s) => ({
         id: s.id,
-        displayDescription: s.displayDescription,
+        displayDescription: s.description,
         capabilities: s.capabilities,
       }));
 
@@ -131,6 +147,8 @@ export function ImportSkillModal({
             existingSkills,
             cfg: llm.cfg,
             model: llm.modelId,
+            signal: controller.signal,
+            onProgress: setAnalysisProgress,
           });
           allCandidates.push(...candidates);
         } else {
@@ -140,6 +158,8 @@ export function ImportSkillModal({
             existingSkills,
             cfg: llm.cfg,
             model: llm.modelId,
+            signal: controller.signal,
+            onProgress: setAnalysisProgress,
           });
           allCandidates.push(...candidates);
         }
@@ -149,40 +169,42 @@ export function ImportSkillModal({
       const byId = new Map<string, JiziSkill>();
       skills.forEach((s) => byId.set(s.id, s));
 
-      const candidateRows: CandidateRow[] = allCandidates.map((c) => {
-        const initialId = normalizeSkillId(c.modelName);
+      const candidateRows: CandidateRow[] = allCandidates.map((c, index) => {
         const conflictId = c.possibleDuplicateOf;
-        const isBuiltinConflict = conflictId
-          ? isBuiltinSkill(byId.get(conflictId))
-          : false;
+        const duplicateSkill = conflictId ? byId.get(conflictId) : undefined;
+        const shouldRewriteLegacy =
+          !!duplicateSkill?.legacyFormat && !isBuiltinSkill(duplicateSkill);
+        const initialId =
+          shouldRewriteLegacy
+            ? normalizeSkillId(conflictId ?? '')
+            : normalizeSkillId(c.index ?? '') ||
+              generatedSkillId(`${c.sourceFile}|${index}|${c.displayTitle}|${c.displayDescription}`);
         const hasIdClash = existingIds.has(initialId);
-        let conflict: ConflictResolution = 'skip';
-        if (hasIdClash) {
-          conflict = 'skip';
-        }
         return {
           ...c,
           id: initialId,
-          conflict,
-          isBuiltinConflict,
+          selected: true,
+          conflict: shouldRewriteLegacy ? 'overwrite' : hasIdClash ? 'rename' : 'skip',
           preserveRaw: c.preserveRaw ?? false,
         };
       });
 
       setRows(candidateRows);
+      setAnalysisProgress('正在检查重复 Skill...');
+      setActiveIndex(0);
       setStage('confirm');
 
-      for (let i = 0; i < candidateRows.length; i += 1) {
-        const row = candidateRows[i];
-        if (!row.possibleDuplicateOf) continue;
+      await Promise.all(candidateRows.map(async (row, i) => {
+        if (!row.possibleDuplicateOf) return;
         const existing = byId.get(row.possibleDuplicateOf);
-        if (!existing) continue;
+        if (!existing) return;
         try {
           const result = await deepCompareSkill({
             candidate: row,
             existing: { id: existing.id, instructions: existing.instructions },
             cfg: llm.cfg,
             model: llm.modelId,
+            signal: controller.signal,
           });
           setRows((prev) =>
             prev.map((r, idx) =>
@@ -207,15 +229,19 @@ export function ImportSkillModal({
             ),
           );
         }
-      }
+      }));
     } catch (err) {
-      message.error(
-        err instanceof Error
-          ? err.message
-          : '姬子分析失败，请重试',
-      );
+      if (controller.signal.aborted) {
+        setAnalysisError(null);
+        message.info('已停止 Skill 分析');
+        return;
+      }
+      const detail = err instanceof Error ? err.message : '姬子分析失败，请重试';
+      setAnalysisError(detail);
     } finally {
+      if (analysisController.current === controller) analysisController.current = null;
       setAnalyzing(false);
+      setAnalysisProgress('');
     }
   };
 
@@ -228,24 +254,44 @@ export function ImportSkillModal({
   const handleConfirmImport = async () => {
     const existingIds = new Set(skills.map((s) => s.id));
     const usedIds = new Set<string>();
-    const toSave: { row: CandidateRow; id: string; overwrite: boolean }[] = [];
-    for (const row of rows) {
-      const rawId = normalizeSkillId(row.id || row.modelName);
+    const toSave: {
+      row: CandidateRow;
+      rowIndex: number;
+      id: string;
+      overwrite: boolean;
+    }[] = [];
+    for (const [rowIndex, row] of rows.entries()) {
+      if (!row.selected) continue;
+      const rawId = normalizeSkillId(row.id) || generatedSkillId(`${row.sourceFile}|${row.displayTitle}`);
       if (!rawId) {
-        message.warning(`存在英文名为空的候选，请补全`);
+        message.warning(`存在索引为空的候选，请补全`);
         return;
       }
-      if (row.conflict === 'skip') continue;
       let finalId = rawId;
       let overwrite = false;
-      if (row.conflict === 'overwrite') {
-        if (!existingIds.has(rawId)) {
-          message.warning(`「${row.displayTitle}」选了覆盖但原 skill 不存在，请改回跳过或改名`);
+
+      if (existingIds.has(rawId)) {
+        if (row.conflict === 'overwrite') {
+          finalId = rawId;
+          overwrite = true;
+        } else if (row.conflict === 'rename') {
+          let suffix = 2;
+          finalId = `${rawId}-${suffix}`;
+          while ((existingIds.has(finalId) || usedIds.has(finalId)) && suffix < 100) {
+            suffix += 1;
+            finalId = `${rawId}-${suffix}`;
+          }
+          if (suffix >= 100) {
+            message.warning(`「${row.displayTitle}」改名尝试 100 次仍冲突，请手动修改索引`);
+            return;
+          }
+        } else {
+          message.warning(
+            `「${row.displayTitle}」的索引 ${rawId} 与已有 skill 冲突，请选择覆盖或自动改名`,
+          );
           return;
         }
-        finalId = rawId;
-        overwrite = true;
-      } else if (row.conflict === 'rename') {
+      } else if (usedIds.has(rawId)) {
         let suffix = 2;
         finalId = `${rawId}-${suffix}`;
         while ((existingIds.has(finalId) || usedIds.has(finalId)) && suffix < 100) {
@@ -253,17 +299,33 @@ export function ImportSkillModal({
           finalId = `${rawId}-${suffix}`;
         }
         if (suffix >= 100) {
-          message.warning(`「${row.displayTitle}」改名尝试 100 次仍冲突，请手动改英文名`);
+          message.warning(`「${row.displayTitle}」改名尝试 100 次仍冲突，请手动修改索引`);
           return;
         }
-      } else if (existingIds.has(rawId) || usedIds.has(rawId)) {
-        message.warning(
-          `「${row.displayTitle}」的英文名 ${rawId} 与已有 skill 冲突，请选择跳过/覆盖/改名`,
-        );
-        return;
+      } else {
+        finalId = rawId;
       }
       usedIds.add(finalId);
-      toSave.push({ row, id: finalId, overwrite });
+      const payload = {
+        description: row.displayDescription.trim(),
+        instructions: row.instructions.trim(),
+      };
+      if (
+        !row.displayTitle.trim() ||
+        !payload.description ||
+        row.capabilities.length === 0 ||
+        !payload.instructions
+      ) {
+        message.warning(`请补全「${row.displayTitle || finalId}」的名称、描述、能力和正文`);
+        return;
+      }
+      try {
+        assertSkillTextLimits(payload);
+      } catch (err) {
+        message.warning(err instanceof Error ? err.message : 'Skill 内容超过长度上限');
+        return;
+      }
+      toSave.push({ row, rowIndex, id: finalId, overwrite });
     }
 
     if (toSave.length === 0) {
@@ -293,51 +355,49 @@ export function ImportSkillModal({
     }
 
     setSaving(true);
-    let success = 0;
-    let failed = 0;
-    for (const item of toSave) {
-      const payload = {
-        id: item.id,
-        displayTitle: item.row.displayTitle.trim(),
-        displayDescription: item.row.displayDescription.trim(),
-        modelName: normalizeSkillId(item.row.modelName),
-        modelDescription: item.row.modelDescription.trim(),
-        capabilities: item.row.capabilities,
-        instructions: item.row.instructions.trim(),
-      };
-      try {
-        if (item.overwrite) {
-          await overwriteJiziSkill(payload);
-        } else {
-          await saveJiziSkill(payload);
-        }
-        success += 1;
-      } catch (err) {
-        failed += 1;
-        message.error(
-          `导入「${item.row.displayTitle}」失败: ${err instanceof Error ? err.message : '未知错误'}`,
-        );
-      }
-    }
-    if (success > 0) {
-      message.success(`成功导入 ${success} 个 skill${failed > 0 ? `，${failed} 个失败` : ''}`);
-    }
-    if (failed === 0) {
+    try {
+      await writeJiziSkills(
+        toSave.map((item) => ({
+          id: item.id,
+          title: item.row.displayTitle.trim(),
+          description: item.row.displayDescription.trim(),
+          category: item.row.category,
+          capabilities: item.row.capabilities,
+          instructions: item.row.instructions.trim(),
+          overwrite: item.overwrite,
+        })),
+      );
+      message.success(`成功导入 ${toSave.length} 个 skill`);
+      await onImported();
       reset();
-      onImported();
-    } else {
-      setStage('confirm');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Skill 导入失败，未写入任何内容');
+    } finally {
+      setSaving(false);
     }
   };
 
   const existingIds = useMemo(() => new Set(skills.map((s) => s.id)), [skills]);
+  const selectedCount = rows.filter((r) => r.selected).length;
+  const conflictCount = rows.filter((r) =>
+    existingIds.has(normalizeSkillId(r.id)),
+  ).length;
+  const activeRow = rows[activeIndex] ?? rows[0];
+  const activeHasIdClash = activeRow
+    ? existingIds.has(normalizeSkillId(activeRow.id))
+    : false;
+  const activeIsDuplicate = !!activeRow?.possibleDuplicateOf;
 
   return (
     <Modal
-      title="导入 Skill"
+      title={null}
       open={open}
       onCancel={() => {
-        if (saving || analyzing) return;
+        if (saving) return;
+        if (analyzing) {
+          analysisController.current?.abort();
+          return;
+        }
         reset();
         onClose();
       }}
@@ -347,181 +407,377 @@ export function ImportSkillModal({
             <Button onClick={() => { reset(); onClose(); }} disabled={saving}>
               取消
             </Button>
-            <Button type="primary" onClick={handleConfirmImport} loading={saving}>
-              导入 {rows.filter((r) => r.conflict !== 'skip').length} 个
+            <Button
+              type="primary"
+              onClick={handleConfirmImport}
+              loading={saving}
+              disabled={selectedCount === 0}
+            >
+              导入 {selectedCount} 个
             </Button>
           </>
+        ) : analyzing ? (
+          <Button danger onClick={() => analysisController.current?.abort()}>
+            停止分析
+          </Button>
         ) : null
       }
-      width={820}
+      width="min(1120px, calc(100vw - 64px))"
+      className="jizi-skill-import-modal"
       destroyOnHidden
-      maskClosable={!analyzing && !saving}
+      mask={{ closable: !analyzing && !saving }}
     >
-      {stage === 'idle' && (
+      {analysisError && (
+        <div className="jizi-skill-import__error">
+          <Alert
+            type="error"
+            showIcon
+            title="Skill 分析失败"
+            description={analysisError}
+            action={(
+              <Button size="small" danger onClick={handleSelectFiles}>
+                重新选择并分析
+              </Button>
+            )}
+          />
+        </div>
+      )}
+      {stage === 'idle' && !analyzing && (
         <div className="jizi-skill-import__intro">
-          <div className="jizi-skill-import__mode">
-            <span className="jizi-skill-import__mode-label">导入模式:</span>
-            <Segmented
-              size="small"
-              value={mode}
-              onChange={(v) => { setMode(v as ImportMode); reset(); }}
-              options={[
-                { label: '智能转写', value: 'rewrite' },
-                { label: '原文照存', value: 'preserve' },
-              ]}
-            />
+          <div className="jizi-skill-import__hero">
+            <div>
+              <div className="jizi-skill-import__eyebrow">Skill 导入</div>
+              <h2>导入 Skill</h2>
+              <p>
+                选择 Markdown 文件后，姬子会读取内容、按专业 Skill 规范整理、识别重复项，并在写入前交给你确认。
+              </p>
+            </div>
+            <div className="jizi-skill-import__summary">
+              <span>支持 .md</span>
+              <strong>最多 5 个文件</strong>
+            </div>
           </div>
-          <p className="jizi-skill-import__hint">
-            {mode === 'rewrite'
-              ? '姬子会阅读全文、自动拆分多功能文件、检测与已有 skill 的重复，并生成中文展示名和描述供你确认。'
-              : '需文件带规范 frontmatter(--- name/description/capabilities ---)。姬子只生成中文名和描述，其余字段原样保留，不支持拆分。'}
-          </p>
-          <Button type="primary" loading={analyzing} onClick={handleSelectFiles}>
-            选择 .md 文件并分析
-          </Button>
+
+          <div className="jizi-skill-import__workspace">
+            <section className="jizi-skill-import__upload-panel">
+              <div className="jizi-skill-import__upload-icon">
+                <CloudUploadOutlined />
+              </div>
+              <div>
+                <h3>选择文件并开始分析</h3>
+                <p>
+                  建议导入包含职责、能力边界、操作步骤的 Skill 文档。分析完成后可以修改名称、描述、能力和冲突策略。
+                </p>
+              </div>
+              <Button
+                type="primary"
+                size="large"
+                icon={<FileMarkdownOutlined />}
+                loading={analyzing}
+                onClick={handleSelectFiles}
+              >
+                选择 .md 文件
+              </Button>
+            </section>
+
+            <aside className="jizi-skill-import__side">
+              <div className="jizi-skill-import__mode-card">
+                <div className="jizi-skill-import__mode-head">
+                  <ThunderboltOutlined />
+                  <span>导入模式</span>
+                </div>
+                <Segmented
+                  block
+                  value={mode}
+                  onChange={(v) => { setMode(v as ImportMode); reset(); }}
+                  options={[
+                    { label: '智能整理', value: 'rewrite' },
+                    { label: '原文照存', value: 'preserve' },
+                  ]}
+                />
+                <p className="jizi-skill-import__hint">
+                  {mode === 'rewrite'
+                    ? '适合普通 Skill 文档：自动拆分，并整理为专业的中文名称、描述、能力和正文。'
+                    : '适合规范 Skill：保留原始正文和能力，仅读取中文名称、描述和索引。'}
+                </p>
+              </div>
+              <div className="jizi-skill-import__checks">
+                <div><SafetyCertificateOutlined /> 检查重复 Skill</div>
+                <div><SafetyCertificateOutlined /> 旧格式 Skill 默认复写</div>
+                <div><SafetyCertificateOutlined /> 保留写入前确认</div>
+                <div><SafetyCertificateOutlined /> 内置 Skill 覆盖需二次确认</div>
+              </div>
+            </aside>
+          </div>
         </div>
       )}
 
       {(analyzing || stage === 'confirm') && (
-        <div className="jizi-skill-import__list">
-          {rows.length === 0 && analyzing && (
-            <p>姬子正在阅读并分析文件，请稍候...</p>
-          )}
-          {rows.map((row, i) => {
-            const hasIdClash = existingIds.has(normalizeSkillId(row.id || row.modelName));
-            const isDuplicate = !!row.possibleDuplicateOf;
-            return (
-              <div
-                key={i}
-                className={`jizi-skill-import__row ${isDuplicate ? 'jizi-skill-import__row--duplicate' : ''}`}
-              >
-                <div className="jizi-skill-import__row-head">
-                  <span className="jizi-skill-import__row-title">
-                    {row.displayTitle}
-                  </span>
-                  {row.preserveRaw && <Tag color="purple">原文照存</Tag>}
-                  <span className="jizi-skill-import__row-source">
-                    来源: {row.sourceFile.split(/[\\/]/).pop() ?? row.sourceFile}
-                  </span>
-                </div>
-                <div className="jizi-skill-import__fields">
-                  <label>
-                    中文展示名
-                    <Input
-                      value={row.displayTitle}
-                      onChange={(e) => updateRow(i, { displayTitle: e.target.value })}
-                    />
-                  </label>
-                  <label>
-                    中文简介
-                    <Input.TextArea
-                      value={row.displayDescription}
-                      autoSize={{ minRows: 2, maxRows: 4 }}
-                      onChange={(e) =>
-                        updateRow(i, { displayDescription: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    英文标识 (id)
-                    <Input
-                      value={row.id}
-                      onChange={(e) => updateRow(i, { id: e.target.value })}
-                      onBlur={(e) =>
-                        updateRow(i, { id: normalizeSkillId(e.target.value) })
-                      }
-                    />
-                  </label>
-                  <label>
-                    英文触发描述
-                    <Input.TextArea
-                      value={row.modelDescription}
-                      autoSize={{ minRows: 2, maxRows: 4 }}
-                      readOnly={row.preserveRaw}
-                      onChange={(e) =>
-                        updateRow(i, { modelDescription: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    具体能力 (一行一个)
-                    <Input.TextArea
-                      value={row.capabilities.join('\n')}
-                      autoSize={{ minRows: 2, maxRows: 4 }}
-                      readOnly={row.preserveRaw}
-                      onChange={(e) =>
-                        updateRow(i, {
-                          capabilities: e.target.value
-                            .split(/\r?\n/)
-                            .map((l) => l.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    做事方法 (instructions)
-                    <Input.TextArea
-                      value={row.instructions}
-                      autoSize={{ minRows: 4, maxRows: 10 }}
-                      readOnly={row.preserveRaw}
-                      onChange={(e) => updateRow(i, { instructions: e.target.value })}
-                    />
-                  </label>
-                </div>
-                {isDuplicate && (
-                  <div className="jizi-skill-import__dup">
-                    <Tag color="orange">疑似与「{row.possibleDuplicateOf}」重复</Tag>
-                    {row.recommendation && (
-                      <Tag color={row.recommendation === 'keep_old' ? 'red' : 'blue'}>
-                        建议: {row.recommendation === 'keep_new'
-                          ? '用新版覆盖'
-                          : row.recommendation === 'keep_old'
-                            ? '保留旧版'
-                            : '两者都保留'}
-                      </Tag>
-                    )}
-                    {row.duplicateReason && (
-                      <span className="jizi-skill-import__dup-reason">
-                        {row.duplicateReason}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {hasIdClash && (
-                  <div className="jizi-skill-import__conflict">
-                    <span>英文名与已有 skill 冲突:</span>
-                    {(['skip', 'overwrite', 'rename'] as ConflictResolution[]).map((opt) => (
-                      <Tooltip
-                        key={opt}
-                        title={
-                          opt === 'overwrite'
-                            ? isBuiltinSkill(
-                                skills.find((s) => s.id === normalizeSkillId(row.id)),
-                              )
-                                ? '覆盖内置 skill，需二次确认'
-                                : '用新内容替换旧 skill 文件'
-                                : undefined
+        <div className="jizi-skill-import__confirm">
+          <div className="jizi-skill-import__confirm-head">
+            <div>
+              <div className="jizi-skill-import__eyebrow">导入确认</div>
+              <h3>确认导入内容</h3>
+              <p>检查解析出的 Skill 候选，勾选后写入本地库。</p>
+            </div>
+            <div className="jizi-skill-import__confirm-stats">
+              <span>已解析 <strong>{rows.length}</strong></span>
+              <span>将导入 <strong>{selectedCount}</strong></span>
+              <span>冲突 <strong>{conflictCount}</strong></span>
+            </div>
+          </div>
+
+          {rows.length === 0 && analyzing ? (
+            <p className="jizi-skill-import__loading">
+              {analysisProgress || '姬子正在阅读并分析文件，请稍候...'}
+            </p>
+          ) : (
+            <div className="jizi-skill-import__review">
+              <aside className="jizi-skill-import__nav" aria-label="待导入 Skill">
+                {rows.map((row, i) => {
+                  const hasIdClash = existingIds.has(
+                    normalizeSkillId(row.id),
+                  );
+                  const isDuplicate = !!row.possibleDuplicateOf;
+                  return (
+                    <div
+                      key={i}
+                      className={`jizi-skill-import__nav-item ${i === activeIndex ? 'jizi-skill-import__nav-item--active' : ''} ${!row.selected ? 'jizi-skill-import__nav-item--off' : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setActiveIndex(i)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setActiveIndex(i);
                         }
+                      }}
+                    >
+                      <Checkbox
+                        checked={row.selected}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          updateRow(i, {
+                            selected: checked,
+                            conflict:
+                              checked && hasIdClash && row.conflict === 'skip'
+                                ? 'rename'
+                                : row.conflict,
+                          });
+                        }}
+                      />
+                      <div className="jizi-skill-import__nav-main">
+                        <span>{row.displayTitle}</span>
+                        <small>{row.sourceFile.split(/[\\/]/).pop() ?? row.sourceFile}</small>
+                        <div className="jizi-skill-import__nav-tags">
+                          {row.preserveRaw && <Tag color="purple">原文</Tag>}
+                          {isDuplicate && <Tag color="orange">重复</Tag>}
+                          {hasIdClash && <Tag color="red">冲突</Tag>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </aside>
+
+              <section className="jizi-skill-import__detail">
+                {activeRow && (
+                  <>
+                    <div className="jizi-skill-import__detail-head">
+                      <div>
+                        <h4>{activeRow.displayTitle}</h4>
+                        <span>
+                          来源: {activeRow.sourceFile.split(/[\\/]/).pop() ?? activeRow.sourceFile}
+                        </span>
+                      </div>
+                      <Checkbox
+                        checked={activeRow.selected}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          updateRow(activeIndex, {
+                            selected: checked,
+                            conflict:
+                              checked && activeHasIdClash && activeRow.conflict === 'skip'
+                                ? 'rename'
+                                : activeRow.conflict,
+                          });
+                        }}
                       >
-                        <Button
-                          size="small"
-                          type={row.conflict === opt ? 'primary' : 'default'}
-                          onClick={() => updateRow(i, { conflict: opt })}
-                        >
-                          {opt === 'skip'
-                            ? '跳过'
-                            : opt === 'overwrite'
-                              ? '覆盖'
-                              : '改名(-2)'}
-                        </Button>
-                      </Tooltip>
-                    ))}
-                  </div>
+                        导入
+                      </Checkbox>
+                    </div>
+
+                    <div className="jizi-skill-import__fields">
+                      <label>
+                        Skill 名称
+                        <Input
+                          value={activeRow.displayTitle}
+                          maxLength={SKILL_TITLE_CHAR_LIMIT}
+                          showCount
+                          onChange={(e) =>
+                            updateRow(activeIndex, { displayTitle: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Skill 描述
+                        <Input.TextArea
+                          value={activeRow.displayDescription}
+                          autoSize={{ minRows: 2, maxRows: 4 }}
+                          maxLength={SKILL_DESCRIPTION_CHAR_LIMIT}
+                          showCount
+                          onChange={(e) =>
+                            updateRow(activeIndex, {
+                              displayDescription: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        分类
+                        <Select
+                          value={activeRow.category}
+                          options={[
+                            { value: 'workflow', label: '工作流' },
+                            { value: 'tool', label: '工具' },
+                            { value: 'diagnosis', label: '诊断' },
+                            { value: 'model', label: '模型' },
+                            { value: 'skill', label: 'Skill 编写' },
+                          ]}
+                          onChange={(category) => updateRow(activeIndex, { category })}
+                        />
+                      </label>
+                      <label>
+                        索引
+                        <Input
+                          value={activeRow.id}
+                          onChange={(e) =>
+                            updateRow(activeIndex, { id: e.target.value })
+                          }
+                          onBlur={(e) => {
+                            const id =
+                              normalizeSkillId(e.target.value) ||
+                              generatedSkillId(
+                                `${activeRow.sourceFile}|${activeRow.displayTitle}`,
+                              );
+                            updateRow(activeIndex, {
+                              id,
+                              conflict:
+                                existingIds.has(id) && activeRow.conflict === 'skip'
+                                  ? 'rename'
+                                  : activeRow.conflict,
+                            });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        具体能力
+                        <Input.TextArea
+                          value={activeRow.capabilities.join('\n')}
+                          autoSize={{ minRows: 3, maxRows: 6 }}
+                          readOnly={activeRow.preserveRaw}
+                          onChange={(e) =>
+                            updateRow(activeIndex, {
+                              capabilities: e.target.value
+                                .split(/\r?\n/)
+                                .map((l) => l.trim())
+                                .filter(Boolean),
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        做事方法
+                        <Input.TextArea
+                          value={activeRow.instructions}
+                          autoSize={{ minRows: 9, maxRows: 16 }}
+                          maxLength={SKILL_INSTRUCTION_CHAR_LIMIT}
+                          showCount
+                          readOnly={activeRow.preserveRaw}
+                          onChange={(e) =>
+                            updateRow(activeIndex, {
+                              instructions: sliceUnicode(
+                                e.target.value,
+                                SKILL_INSTRUCTION_CHAR_LIMIT,
+                              ),
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    {activeIsDuplicate && (
+                      <div className="jizi-skill-import__dup">
+                        <Tag color="orange">疑似与「{activeRow.possibleDuplicateOf}」重复</Tag>
+                        {activeRow.recommendation && (
+                          <Tag color={activeRow.recommendation === 'keep_old' ? 'red' : 'blue'}>
+                            建议: {activeRow.recommendation === 'keep_new'
+                              ? '用新版覆盖'
+                              : activeRow.recommendation === 'keep_old'
+                                ? '保留旧版'
+                                : '两者都保留'}
+                          </Tag>
+                        )}
+                        {activeRow.duplicateReason && (
+                          <span className="jizi-skill-import__dup-reason">
+                            {activeRow.duplicateReason}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {activeHasIdClash && (
+                      <div className="jizi-skill-import__conflict">
+                        <span>与本地已有 Skill 冲突:</span>
+                        {(['skip', 'overwrite', 'rename'] as ConflictResolution[]).map((opt) => (
+                          <Tooltip
+                            key={opt}
+                            title={
+                              opt === 'overwrite'
+                                ? isBuiltinSkill(
+                                    skills.find(
+                                      (s) =>
+                                        s.id ===
+                                        normalizeSkillId(activeRow.id),
+                                    ),
+                                  )
+                                    ? '覆盖内置 skill，需二次确认'
+                                    : '用新内容替换旧 skill 文件'
+                                    : undefined
+                            }
+                          >
+                            <Button
+                              size="small"
+                              type={
+                                (opt === 'skip'
+                                  ? !activeRow.selected
+                                  : activeRow.selected && activeRow.conflict === opt)
+                                  ? 'primary'
+                                  : 'default'
+                              }
+                              onClick={() =>
+                                updateRow(activeIndex, {
+                                  conflict: opt,
+                                  selected: opt !== 'skip',
+                                })
+                              }
+                            >
+                              {opt === 'skip'
+                                ? '不导入'
+                                : opt === 'overwrite'
+                                  ? '覆盖'
+                                  : '自动改名'}
+                            </Button>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
-              </div>
-            );
-          })}
+              </section>
+            </div>
+          )}
         </div>
       )}
     </Modal>

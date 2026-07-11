@@ -1,60 +1,44 @@
 ---
-name: tool-generation-review
-description: Generate and review custom Python tools for the multi-agent app. Use when built-in tools do not cover a task and the user wants a new tool, or when failure diagnosis suggests a missing tool/library.
+index: "tool-generation-review"
+title: "工具生成审阅"
+description: "当现有工具无法覆盖任务、用户需要新工具或诊断发现缺少工具/依赖时使用，先整理需求、契约和安全边界。"
+category: "tool"
+capabilities: "整理工具需求 | 定义工具契约 | 审阅依赖安全 | 生成安装前清单"
 ---
 
-# Tool Generation Review
+# 工具生成审阅
 
-Use this skill only for custom tool creation or review.
+## 具体能力
 
-## Workflow
+- 整理工具需求
+- 定义工具契约
+- 审阅依赖安全
+- 生成安装前清单
 
-1. Confirm the built-in tools do not already cover the task.
-2. Define the tool contract: name, input params, output result, dependencies, and error behavior.
-3. Prefer a mature library over hand-written fragile parsing.
-4. Generate the complete tool proposal metadata, not just Python code.
-5. Generate code with a single top-level `async def execute(params)` entry point.
-6. Avoid top-level side effects. Imports, constants, class/function definitions, and safe compiled regex are acceptable.
-7. Show the complete code for review before installation.
-8. Warn that installation writes code to disk, writes metadata into the tool registry, and may install dependencies.
-9. Install only after explicit user confirmation.
+## 做事方法
 
-## Generated Tool Metadata
+仅在现有工具无法覆盖任务，或诊断明确指向缺少工具能力时使用。先确认任务目标、输入参数、输出结果、错误行为、依赖和安全边界，再考虑生成工具。
 
-When generating a new Python tool, always produce the full installable tool package. Do not output code alone.
+优先使用成熟库，不要手写脆弱解析。工具代码必须只有一个顶层 `async def execute(params)` 入口；不要有导入时副作用。允许安全的 import、常量、类/函数定义和编译正则。
 
-The proposal must include:
+生成工具提案时不要只给代码，必须包含完整元数据：
 
 - `name`: lowercase executable tool id, such as `api-tester`.
-- `description`: Chinese user-facing summary shown in the tool library.
-- `tags`: use the tool name itself as the only tag, such as `["api-tester"]`. Do not create category tags like `api`, `test`, or `http`.
-- `dependencies`: pip packages required by the tool. Use `[]` when only the Python standard library is needed.
-- `implementation`: `language`, `libraries`, and a short Chinese `note` explaining how the tool works.
-- `capabilities`: 3-6 Chinese capability items. Each item must include `label` and `description`.
-- `code`: complete Python module code with `async def execute(params)`.
+- `description`: 中文展示说明。
+- `tags`: 只使用工具名本身作为标签，不创建泛分类标签。
+- `dependencies`: 必需 pip 包；仅用标准库时填空列表。
+- `implementation`: 语言、库和简短中文工作说明。
+- `capabilities`: 3-6 条能力，每条包含 `label` 和 `description`。
+- `code`: 完整 Python 模块代码。
 
-After the user confirms installation, save the metadata together with the tool entry in `python/tools/custom/registry.json`, so the tool library can display generated tools like first-class tools instead of bare scripts.
+安装前必须展示完整代码和影响范围。说明安装会写入代码、更新工具注册表，必要时安装依赖。只有用户明确确认后才能安装。
 
-Use capability descriptions to explain what the tool can actually do, what important params it accepts, and what useful result it returns.
+审阅清单：
 
-Example capability style:
-
-- `发送 HTTP 请求`: supports method, url, headers, query params, JSON/body, and timeout.
-- `读取响应信息`: returns status code, response headers, parsed JSON/body, and elapsed time.
-- `状态码断言`: compares the actual status code with `expected_status` and reports whether the API behaves as expected.
-
-## Safety Rules
-
-- Never hide code from the user.
-- Never auto-install unreviewed generated code.
-- Avoid file deletion, shell commands, network calls, or environment changes unless the tool's purpose absolutely requires them and the user confirms.
-- Keep dependency lists short and specific.
-
-## Review Checklist
-
-- Does the tool name avoid conflicting with built-in tools?
-- Are inputs validated?
-- Does it return JSON-friendly data?
-- Are errors readable?
-- Are dependencies necessary?
-- Is there any import-time side effect?
+- 名称是否避开内置工具冲突。
+- 输入是否校验。
+- 输出是否 JSON 友好。
+- 错误是否可读。
+- 依赖是否必要且具体。
+- 是否存在导入时副作用。
+- 是否涉及删除文件、命令执行、网络访问或环境修改；如涉及，必须额外提示风险并等待确认。

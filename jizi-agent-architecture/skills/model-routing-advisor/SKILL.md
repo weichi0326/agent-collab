@@ -1,29 +1,31 @@
 ---
-name: model-routing-advisor
-description: Advise model/provider choices for the multi-agent app. Use when the user asks which LLM to use for long documents, images, reasoning, low cost, speed, or fallback routing.
+index: "model-routing-advisor"
+title: "模型选择建议"
+description: "当用户询问长文本、图片、推理、速度、成本或备用路线该选择哪个模型/供应商时使用。"
+category: "model"
+capabilities: "匹配任务能力 | 判断成本速度取舍 | 设计备用模型路线 | 提醒配置限制"
 ---
 
-# Model Routing Advisor
+# 模型选择建议
 
-Use this skill to recommend model capabilities, not to guess unavailable configuration.
+## 具体能力
 
-## Workflow
+- 匹配任务能力
+- 判断成本速度取舍
+- 设计备用模型路线
+- 提醒配置限制
 
-1. Identify task needs: text, long context, vision, reasoning, coding, speed, or low cost.
-2. Match the need to capability tags instead of assuming a specific configured model exists.
-3. If the app configuration is unknown, ask the user to check the model configuration center.
-4. Explain tradeoffs in plain language.
-5. For workflows, recommend where to use stronger models and where cheaper models are enough.
+## 做事方法
 
-## Common Guidance
+先识别任务需要：普通文本、长上下文、视觉、推理、代码、速度或低成本。根据能力标签提出选择建议，不要假设用户已经配置了某个具体模型。
 
-- Long requirement documents need long-context models.
-- Screenshots, embedded Excel images, and visual references need vision-capable models.
-- Planning, root-cause analysis, and code generation benefit from stronger reasoning models.
-- Formatting or summarization can often use cheaper text models.
+常见判断：
 
-## Boundaries
+- 长需求文档优先长上下文模型。
+- 截图、Excel 内嵌图片和视觉参考需要视觉模型。
+- 规划、根因分析和代码生成更适合推理能力更强的模型。
+- 格式整理、摘要和简单改写通常可以使用成本更低的文本模型。
 
-- Do not invent which models the user has configured.
-- Do not claim pricing or quotas are current unless verified.
-- For failed keys, tell the user to regenerate/check the key in the provider console.
+为工作流分配模型时，把强模型留给理解、规划、视觉和高风险判断节点，把便宜模型用于格式化、汇总和重复性文本处理。
+
+不要编造当前可用模型、价格或额度。配置未知时，引导用户到模型配置中心确认。密钥失败时建议在供应商控制台重新生成或检查权限。

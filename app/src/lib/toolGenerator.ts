@@ -111,6 +111,7 @@ export async function generateToolWithLLM(
     cfg,
     model,
     signal,
+    { requiredIds: ['tool-generation-review'], autoSelect: false },
   );
   const reply = await chat({
     cfg,

@@ -19,6 +19,10 @@ import { useModelStore } from './stores/modelStore';
 import { useSearchStore } from './stores/searchStore';
 import { useMasterAgentStore } from './stores/masterAgentStore';
 import { useUiStore } from './stores/uiStore';
+import { useToolStore } from './stores/toolStore';
+import { useTokenStatsStore } from './stores/tokenStatsStore';
+import { useOrchestratorStore } from './stores/orchestratorStore';
+import { useJiziSkillSettingsStore } from './stores/jiziSkillStore';
 import './App.css';
 
 // 桌面端 persist 从项目内 JSON 异步读盘,首帧数据为空。等所有 store 完成 hydration
@@ -30,6 +34,10 @@ const PERSISTED = [
   useSearchStore,
   useMasterAgentStore,
   useUiStore,
+  useToolStore,
+  useTokenStatsStore,
+  useOrchestratorStore,
+  useJiziSkillSettingsStore,
 ];
 
 const HYDRATION_TIMEOUT_MS = 8000;

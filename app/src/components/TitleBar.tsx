@@ -14,7 +14,6 @@ import {
   ArrowLeftOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { invoke, isTauri } from '@tauri-apps/api/core';
 import {
   useCanvasStore,
   validateCanvasName,
@@ -36,15 +35,6 @@ import {
   unregisterRunController,
 } from '../lib/runControllers';
 import { useAbortedRunStore } from '../stores/abortedRunStore';
-
-async function setNativeTaskRunning(running: boolean): Promise<void> {
-  if (!isTauri()) return;
-  try {
-    await invoke('set_task_running', { running });
-  } catch {
-    // 运行态同步只是窗口关闭保护，失败时不阻断任务本身。
-  }
-}
 
 interface TitleBarProps {
   view: 'workspace' | 'reports';
@@ -123,7 +113,6 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
     const runCanvasId = activeId;
     registerRunController(runCanvasId, controller);
     setRunning(true);
-    void setNativeTaskRunning(true);
     try {
       const result = await runCanvas(activeId, controller.signal);
       message.success(
@@ -148,7 +137,6 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
       unregisterRunController(runCanvasId, controller);
       abortRef.current = null;
       setRunning(false);
-      void setNativeTaskRunning(false);
     }
   };
 

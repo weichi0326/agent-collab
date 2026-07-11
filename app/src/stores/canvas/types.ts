@@ -109,6 +109,8 @@ export interface CreatedRun {
   canvasId: string;
 }
 
+export type CanvasOpenResult = 'opened' | 'activated' | 'limit' | 'not-found';
+
 export interface Snapshot {
   nodes: Node[];
   edges: Edge[];
@@ -119,3 +121,7 @@ export interface Snapshot {
 
 // 同时打开的画布 tab 软上限(仅防标签栏/内存失控);运行并发另有 MAX_CONCURRENT_RUNS 管控。
 export const MAX_CANVASES = 20;
+
+export function canvasLimitMessage(maxCanvases = MAX_CANVASES): string {
+  return `最多只能同时打开 ${maxCanvases} 个画布，请先关闭一个再继续`;
+}

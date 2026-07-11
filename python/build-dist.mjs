@@ -21,6 +21,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { verifyPythonDist } from './verify-dist.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -146,6 +147,9 @@ async function copyAppCode() {
   await fs.copyFile(path.join(PYTHON_SRC, 'app.py'), path.join(DIST, 'app.py'));
   await fs.copyFile(REQUIREMENTS, path.join(DIST, 'requirements.txt'));
 
+  // 同步时先清理旧源码，避免历史构建目录里残留用户模块或 registry 被误打进安装包。
+  await fs.rm(path.join(DIST, 'tools'), { recursive: true, force: true });
+
   // tools/：排除 __pycache__、tests；custom/ 只保留 __init__.py（空的用户工具目录）
   await copyDir(path.join(PYTHON_SRC, 'tools'), path.join(DIST, 'tools'), (relPath) => {
     const parts = relPath.split('/');
@@ -158,8 +162,6 @@ async function copyAppCode() {
     return true;
   });
 
-  // custom/registry.json 重置为空数组（打包机上不带任何已注册的动态工具）
-  await fs.writeFile(path.join(DIST, 'tools', 'custom', 'registry.json'), '[]', 'utf8');
   log('app 代码拷贝完成');
 }
 
@@ -194,6 +196,7 @@ async function main() {
     }
     log(`[sync-only] 同步 app.py + tools/ → ${DIST}`);
     await copyAppCode();
+    await verifyPythonDist(DIST);
     log('[sync-only] 完成');
     return;
   }
@@ -218,6 +221,7 @@ async function main() {
 
   pipInstall();
   await copyAppCode();
+  await verifyPythonDist(DIST);
 
   if (!keepDownload) {
     await fs.rm(tarPath, { force: true });

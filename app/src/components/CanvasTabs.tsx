@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import {
   useCanvasStore,
+  canvasLimitMessage,
   isCanvasDirty,
   validateCanvasName,
   type CanvasRunStatus,
@@ -41,11 +42,7 @@ function CanvasTabs() {
     action: 'add' | 'remove',
   ) => {
     if (action === 'add') {
-      if (canvases.length >= maxCanvases) {
-        message.warning(`最多只能同时打开 ${maxCanvases} 个画布`);
-        return;
-      }
-      addCanvas();
+      if (!addCanvas()) message.warning(canvasLimitMessage(maxCanvases));
       return;
     }
     const id = targetKey as string;

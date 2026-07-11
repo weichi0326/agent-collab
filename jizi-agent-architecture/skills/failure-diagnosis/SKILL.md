@@ -1,35 +1,32 @@
 ---
-name: failure-diagnosis
-description: Diagnose failed canvas nodes in the multi-agent app. Use when a node, tool call, model call, file read/write, Python service, or workflow run fails and the user wants a practical explanation and next step.
+index: "failure-diagnosis"
+title: "失败诊断"
+description: "当节点、工具、模型、文件、Python 服务或流程运行失败时使用，帮助判断原因、影响和下一步修复动作。"
+category: "diagnosis"
+capabilities: "判断失败原因 | 说明实际影响 | 给出低成本检查 | 区分用户处理和开发修复"
 ---
 
-# Failure Diagnosis
+# 失败诊断
 
-Use this skill to explain failures without panic or guesswork.
+## 具体能力
 
-## Workflow
+- 判断失败原因
+- 说明实际影响
+- 给出低成本检查
+- 区分用户处理和开发修复
 
-1. Classify the failure: key/config, network, model capability, file/path, Python service, missing dependency, tool bug, prompt/input issue, or app bug.
-2. Say the likely consequence in plain language.
-3. Give the cheapest check first.
-4. Separate user-fixable steps from developer fixes.
-5. If the issue looks like missing tool capability, suggest a candidate tool only after explaining why.
-6. If uncertain, say what evidence would decide it.
+## 做事方法
 
-## Guardrails
+先归类失败来源：密钥或配置、网络、模型能力、文件路径、Python 服务、缺失依赖、工具缺陷、提示词/输入问题或应用缺陷。用直白语言说明实际后果，再给出成本最低的第一步检查。
 
-- Do not pretend every failure needs a new tool.
-- Do not advise risky system changes unless clearly necessary.
-- For API keys, never repeat the full key.
-- For model vision errors, suggest a vision-capable model or removing images from the input.
-- For rate limits or quota, suggest waiting, changing provider, or checking billing.
+把用户可以自行处理的动作和需要开发修复的动作分开。证据不足时，不要猜定论；说明还需要哪条日志、配置、路径或返回信息来判断。
 
-## Output Template
+约束：
 
-```text
-问题: ...
-后果: ...
-先试这个: ...
-如果还不行: ...
-是否值得修: ...
-```
+- 不要把所有失败都归因于缺少新工具。
+- 不要建议高风险系统改动，除非证据明确。
+- 涉及 API key 时不要复述完整密钥。
+- 视觉模型错误优先建议换用视觉模型或移除图片输入。
+- 速率限制或额度问题优先建议等待、换供应商或检查账单。
+
+输出时包含：问题、影响、先试这个、如果还不行、是否需要开发修复。

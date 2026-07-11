@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Button, Result } from 'antd';
+import { clearProjectStorageData } from '../lib/tauriStorage';
 
 // 顶层错误边界:任一子树抛错时兜底展示,避免整页白屏。
 // 提供「重载页面」与「清空本地数据」两条自救路径(persist 反序列化损坏时后者可恢复)。
@@ -23,11 +24,18 @@ class ErrorBoundary extends Component<Props, State> {
 
   private reload = () => window.location.reload();
 
-  private resetLocal = () => {
-    Object.keys(localStorage)
-      .filter((k) => k.startsWith('multi-agent-'))
-      .forEach((k) => localStorage.removeItem(k));
-    window.location.reload();
+  private resetLocal = async () => {
+    try {
+      await clearProjectStorageData();
+      window.location.reload();
+    } catch (error) {
+      console.error('清空本地数据失败:', error);
+      this.setState({
+        error: new Error(
+          `清空本地数据失败: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      });
+    }
   };
 
   render(): ReactNode {
@@ -42,7 +50,7 @@ class ErrorBoundary extends Component<Props, State> {
           <Button type="primary" key="reload" onClick={this.reload}>
             重载页面
           </Button>,
-          <Button danger key="reset" onClick={this.resetLocal}>
+          <Button danger key="reset" onClick={() => void this.resetLocal()}>
             清空本地数据并重载
           </Button>,
         ]}

@@ -54,3 +54,6 @@ htmlcov/
 
 # Machine-specific Rust linker override. Each computer may have a different Rust path.
 /app/.cargo/config.toml
+
+# Local bootstrap tools downloaded by setup-dev-env.ps1.
+/.devtools/

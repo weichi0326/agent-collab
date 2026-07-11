@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use serde::Serialize;
-use serde_json::Value;
 
 // M12 修复：value 大小上限（10 MB），防止单次写盘超大 JSON 导致磁盘耗尽
 const MAX_VALUE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
@@ -46,6 +46,7 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static DATA_DIR_CACHE: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+static USER_SKILLS_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 fn data_dir() -> Result<&'static PathBuf, String> {
     DATA_DIR_CACHE
@@ -87,6 +88,66 @@ fn app_base_dir() -> Result<PathBuf, String> {
             .map(|p| p.to_path_buf())
             .ok_or_else(|| "无法定位可执行文件目录".to_string())
     }
+}
+
+pub fn configure_user_skills_dir(user_data_dir: PathBuf) -> Result<(), String> {
+    let target = user_data_dir.join("skills");
+    fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+
+    let legacy = app_base_dir()?
+        .join("jizi-agent-architecture")
+        .join("skills");
+    let migration_error = migrate_legacy_skills(&legacy, &target).err();
+    USER_SKILLS_DIR
+        .set(target)
+        .map_err(|_| "用户 Skill 目录已配置".to_string())?;
+    if let Some(error) = migration_error {
+        log::warn!("[skills] 旧 Skill 迁移未完全成功，已继续使用新目录: {error}");
+    }
+    Ok(())
+}
+
+fn migrate_legacy_skills(legacy: &Path, target: &Path) -> Result<(), String> {
+    if !legacy.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(legacy).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let source_dir = entry.path();
+        if !source_dir.is_dir() {
+            continue;
+        }
+        let Some(id) = source_dir.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !valid_skill_id(id) {
+            continue;
+        }
+        let source = source_dir.join("SKILL.md");
+        let destination_dir = target.join(id);
+        let destination = destination_dir.join("SKILL.md");
+        if source.is_file() && !destination.exists() {
+            fs::create_dir_all(&destination_dir).map_err(|e| e.to_string())?;
+            fs::copy(&source, &destination).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn user_skills_dir() -> Result<&'static PathBuf, String> {
+    USER_SKILLS_DIR
+        .get()
+        .ok_or_else(|| "用户 Skill 目录尚未配置".to_string())
+}
+
+fn valid_skill_id(id: &str) -> bool {
+    id.len() >= 2
+        && id.len() <= 48
+        && !id.starts_with('-')
+        && !id.ends_with('-')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 #[tauri::command]
@@ -145,7 +206,11 @@ pub fn open_path(path: String) -> Result<(), String> {
         } else {
             let mut command = Command::new("powershell");
             command
-                .args(["-NoProfile", "-Command", "Start-Process -LiteralPath $env:AGENT_OPEN_PATH"])
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    "Start-Process -LiteralPath $env:AGENT_OPEN_PATH",
+                ])
                 .env("AGENT_OPEN_PATH", &path);
             command
         }
@@ -164,13 +229,13 @@ pub fn open_path(path: String) -> Result<(), String> {
         .map_err(|e| format!("打开文件失败: {e}"))
 }
 
-fn path_to_string(path: &PathBuf) -> Result<String, String> {
+fn path_to_string(path: &Path) -> Result<String, String> {
     path.to_str()
         .map(|s| s.to_string())
         .ok_or_else(|| format!("路径包含非 UTF-8 字符: {:?}", path))
 }
 
-fn is_inside_outputs(path: &PathBuf) -> Result<bool, String> {
+fn is_inside_outputs(path: &Path) -> Result<bool, String> {
     let output_root = output_dir_path()?
         .canonicalize()
         .map_err(|e| e.to_string())?;
@@ -188,10 +253,16 @@ fn is_inside_outputs(path: &PathBuf) -> Result<bool, String> {
 }
 
 fn value_string(value: Option<&Value>) -> String {
-    value.and_then(|v| v.as_str()).unwrap_or_default().to_string()
+    value
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
-fn read_report(data_path: PathBuf, node_label_filter: Option<&str>) -> Result<Option<OutputReport>, String> {
+fn read_report(
+    data_path: PathBuf,
+    node_label_filter: Option<&str>,
+) -> Result<Option<OutputReport>, String> {
     let text = fs::read_to_string(&data_path).map_err(|e| e.to_string())?;
     let value: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     if value.get("kind").and_then(|v| v.as_str()) != Some("agent-node-output") {
@@ -234,13 +305,13 @@ fn read_report(data_path: PathBuf, node_label_filter: Option<&str>) -> Result<Op
     }))
 }
 
-fn modified_or_epoch(path: &PathBuf) -> SystemTime {
+fn modified_or_epoch(path: &Path) -> SystemTime {
     path.metadata()
         .and_then(|m| m.modified())
         .unwrap_or(UNIX_EPOCH)
 }
 
-fn read_dir_sorted_desc(dir: &PathBuf) -> Result<Vec<PathBuf>, String> {
+fn read_dir_sorted_desc(dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut paths = fs::read_dir(dir)
         .map_err(|e| e.to_string())?
         .map(|entry| entry.map(|e| e.path()).map_err(|e| e.to_string()))
@@ -258,11 +329,11 @@ fn read_dir_sorted_desc(dir: &PathBuf) -> Result<Vec<PathBuf>, String> {
 }
 
 fn collect_recent_reports(
-    root: &PathBuf,
+    root: &Path,
     node_label_filter: Option<&str>,
     reports: &mut Vec<OutputReport>,
 ) -> Result<(), String> {
-    let mut stack = vec![root.clone()];
+    let mut stack = vec![root.to_path_buf()];
     let mut visited_dirs = 0usize;
 
     while let Some(dir) = stack.pop() {
@@ -333,13 +404,13 @@ pub fn delete_output_report(paths: Vec<String>) -> Result<(), String> {
 // key 白名单：只允许应用自己的存储键，防路径穿越 / 越权写盘。
 #[tauri::command]
 pub fn list_jizi_skill_files() -> Result<Vec<JiziSkillFile>, String> {
-    let skills_root = app_base_dir()?.join("jizi-agent-architecture").join("skills");
+    let skills_root = user_skills_dir()?;
     if !skills_root.exists() {
         return Ok(Vec::new());
     }
 
     let mut skills = Vec::new();
-    for entry in fs::read_dir(&skills_root).map_err(|e| e.to_string())? {
+    for entry in fs::read_dir(skills_root).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let dir = entry.path();
         if !dir.is_dir() {
@@ -349,10 +420,7 @@ pub fn list_jizi_skill_files() -> Result<Vec<JiziSkillFile>, String> {
         let Some(id) = dir.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        {
+        if !valid_skill_id(id) {
             continue;
         }
 
@@ -379,8 +447,7 @@ fn yaml_line_value(value: &str) -> String {
         value
             .replace('\\', "\\\\")
             .replace('"', "\\\"")
-            .replace('\r', " ")
-            .replace('\n', " ")
+            .replace(['\r', '\n'], " ")
             .trim()
     )
 }
@@ -396,37 +463,130 @@ fn markdown_list(items: &[String]) -> String {
 #[tauri::command]
 pub fn save_jizi_skill_file(
     id: String,
-    display_title: String,
-    display_description: String,
-    model_name: String,
-    model_description: String,
+    title: String,
+    description: String,
+    category: String,
     capabilities: Vec<String>,
     instructions: String,
 ) -> Result<(), String> {
     let (skill_path, content, id_label) =
-        build_jizi_skill_artifacts(id, display_title, display_description, model_name,
-                                   model_description, capabilities, instructions)?;
+        build_jizi_skill_artifacts(id, title, description, category, capabilities, instructions)?;
     if skill_path.exists() {
         return Err(format!("skill「{id_label}」已存在"));
     }
-    fs::write(&skill_path, content).map_err(|e| e.to_string())?;
+    atomic_write(&skill_path, &content)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn overwrite_jizi_skill_file(
     id: String,
-    display_title: String,
-    display_description: String,
-    model_name: String,
-    model_description: String,
+    title: String,
+    description: String,
+    category: String,
     capabilities: Vec<String>,
     instructions: String,
 ) -> Result<(), String> {
     let (skill_path, content, _id_label) =
-        build_jizi_skill_artifacts(id, display_title, display_description, model_name,
-                                   model_description, capabilities, instructions)?;
-    fs::write(&skill_path, content).map_err(|e| e.to_string())?;
+        build_jizi_skill_artifacts(id, title, description, category, capabilities, instructions)?;
+    atomic_write(&skill_path, &content)?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiziSkillWriteInput {
+    id: String,
+    title: String,
+    description: String,
+    category: String,
+    capabilities: Vec<String>,
+    instructions: String,
+    overwrite: bool,
+}
+
+#[tauri::command]
+pub fn write_jizi_skill_files(items: Vec<JiziSkillWriteInput>) -> Result<(), String> {
+    if items.is_empty() {
+        return Err("没有要写入的 Skill".to_string());
+    }
+    if items.len() > 50 {
+        return Err("一次最多写入 50 个 Skill".to_string());
+    }
+
+    let mut prepared = Vec::with_capacity(items.len());
+    let mut ids = std::collections::HashSet::new();
+    for item in items {
+        let (path, content, id) = build_jizi_skill_artifacts(
+            item.id,
+            item.title,
+            item.description,
+            item.category,
+            item.capabilities,
+            item.instructions,
+        )?;
+        if !ids.insert(id.clone()) {
+            return Err(format!("本批次包含重复 Skill 索引「{id}」"));
+        }
+        if path.exists() && !item.overwrite {
+            return Err(format!("skill「{id}」已存在"));
+        }
+        prepared.push((path, content));
+    }
+
+    write_prepared_skill_transaction(&prepared)
+}
+
+fn write_prepared_skill_transaction(prepared: &[(PathBuf, String)]) -> Result<(), String> {
+    let snapshots = prepared
+        .iter()
+        .map(|(path, _)| {
+            if path.exists() {
+                fs::read_to_string(path)
+                    .map(Some)
+                    .map_err(|e| e.to_string())
+            } else {
+                Ok(None)
+            }
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    for (index, (path, content)) in prepared.iter().enumerate() {
+        if let Err(error) = atomic_write(path, content) {
+            for rollback_index in 0..=index {
+                let rollback_path = &prepared[rollback_index].0;
+                match &snapshots[rollback_index] {
+                    Some(previous) => {
+                        let _ = atomic_write(rollback_path, previous);
+                    }
+                    None => {
+                        let _ = fs::remove_file(rollback_path);
+                        if let Some(parent) = rollback_path.parent() {
+                            let _ = fs::remove_dir(parent);
+                        }
+                    }
+                }
+            }
+            return Err(format!("批量写入失败，已回滚: {error}"));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_jizi_skill_file(id: String) -> Result<(), String> {
+    let id = id.trim();
+    if !valid_skill_id(id) {
+        return Err("Skill 索引格式不正确".to_string());
+    }
+    let dir = user_skills_dir()?.join(id);
+    let path = dir.join("SKILL.md");
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    if dir.exists() {
+        fs::remove_dir(&dir).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -448,63 +608,57 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 
 fn build_jizi_skill_artifacts(
     id: String,
-    display_title: String,
-    display_description: String,
-    model_name: String,
-    model_description: String,
+    title: String,
+    description: String,
+    category: String,
     capabilities: Vec<String>,
     instructions: String,
 ) -> Result<(std::path::PathBuf, String, String), String> {
     let id = id.trim().to_string();
-    if id.len() < 2 || id.len() > 48 {
-        return Err("skill 标识长度应为 2-48 个字符".to_string());
+    if !valid_skill_id(&id) {
+        return Err(
+            "skill 标识只能使用小写字母、数字和连字符，且不能以连字符开头或结尾".to_string(),
+        );
     }
-    if !id
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        || id.starts_with('-')
-        || id.ends_with('-')
-    {
-        return Err("skill 标识只能使用小写字母、数字和连字符，且不能以连字符开头或结尾".to_string());
+    let title = title.trim();
+    let description = description.trim();
+    let category = category.trim();
+    if !matches!(
+        category,
+        "workflow" | "tool" | "diagnosis" | "model" | "skill"
+    ) {
+        return Err("skill 分类不正确".to_string());
     }
-    let display_title = display_title.trim();
-    let display_description = display_description.trim();
-    let model_name = model_name.trim();
-    if model_name.len() < 2 || model_name.len() > 64 {
-        return Err("英文识别名长度应为 2-64 个字符".to_string());
-    }
-    if !model_name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        || model_name.starts_with('-')
-        || model_name.ends_with('-')
-    {
-        return Err("英文识别名只能使用小写字母、数字和连字符，且不能以连字符开头或结尾".to_string());
-    }
-    let model_description = model_description.trim();
     let capabilities = capabilities
         .into_iter()
         .map(|item| item.trim().to_string())
         .filter(|item| !item.is_empty())
-        .take(20)
         .collect::<Vec<_>>();
     let instructions = instructions.trim();
-    if display_title.is_empty()
-        || display_description.is_empty()
-        || model_description.is_empty()
+    if title.is_empty()
+        || description.is_empty()
         || capabilities.is_empty()
         || instructions.is_empty()
     {
-        return Err("中文展示、模型说明、具体能力和做事方法不能为空".to_string());
+        return Err("名称、描述、具体能力和做事方法不能为空".to_string());
     }
-    if instructions.len() > 24_000 {
-        return Err("skill 内容过长，请控制在 24000 字符以内".to_string());
+    if instructions.chars().count() > 20_000 {
+        return Err("skill 正文过长，请控制在 20000 个字符以内".to_string());
     }
-    if display_description.len() > 1_000 || model_description.len() > 2_000 {
-        return Err("skill 描述过长，请再压缩一下".to_string());
+    if description.chars().count() > 1_000 {
+        return Err("skill 描述过长，请控制在 1000 个字符以内".to_string());
+    }
+    if title.chars().count() > 100 {
+        return Err("skill 名称过长，请控制在 100 个字符以内".to_string());
+    }
+    if capabilities.len() < 3 || capabilities.len() > 8 {
+        return Err("skill 具体能力应保持在 3-8 条".to_string());
+    }
+    if capabilities.iter().any(|item| item.chars().count() > 100) {
+        return Err("skill 单条能力过长，请控制在 100 个字符以内".to_string());
     }
 
-    let skills_root = app_base_dir()?.join("jizi-agent-architecture").join("skills");
+    let skills_root = user_skills_dir()?;
     let skill_dir = skills_root.join(&id);
     fs::create_dir_all(&skill_dir).map_err(|e| e.to_string())?;
     let skill_path = skill_dir.join("SKILL.md");
@@ -513,22 +667,22 @@ fn build_jizi_skill_artifacts(
     let content = format!(
         concat!(
             "---\n",
-            "name: {model_name}\n",
-            "description: {model_description}\n",
-            "display_title: {display_title}\n",
-            "display_description: {display_description}\n",
+            "index: {index}\n",
+            "title: {title}\n",
+            "description: {description}\n",
+            "category: {category}\n",
             "capabilities: {capability_text}\n",
             "---\n\n",
-            "# {display_title}\n\n",
-            "## Capabilities\n\n",
+            "# {title}\n\n",
+            "## 具体能力\n\n",
             "{capability_markdown}\n\n",
-            "## Instructions\n\n",
+            "## 做事方法\n\n",
             "{instructions}\n"
         ),
-        model_name = model_name,
-        model_description = yaml_line_value(model_description),
-        display_title = yaml_line_value(display_title),
-        display_description = yaml_line_value(display_description),
+        index = yaml_line_value(&id),
+        title = yaml_line_value(title),
+        description = yaml_line_value(description),
+        category = yaml_line_value(category),
         capability_text = yaml_line_value(&capability_text),
         capability_markdown = capability_markdown,
         instructions = instructions
@@ -557,7 +711,9 @@ pub fn storage_get(key: String) -> Result<Option<String>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    fs::read_to_string(&path).map(Some).map_err(|e| e.to_string())
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -611,6 +767,10 @@ pub fn storage_remove(key: String) -> Result<(), String> {
     if path.exists() {
         fs::remove_file(&path).map_err(|e| e.to_string())?;
     }
+    let backup = path.with_extension("bak");
+    if backup.exists() {
+        fs::remove_file(&backup).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -618,6 +778,54 @@ pub fn storage_remove(key: String) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn skill_limits_count_unicode_characters_not_utf8_bytes() {
+        assert_eq!("汉".repeat(20_000).chars().count(), 20_000);
+        assert!("汉".repeat(20_000).len() > 20_000);
+        assert_eq!("😀".repeat(1_000).chars().count(), 1_000);
+    }
+
+    #[test]
+    fn legacy_skill_migration_preserves_newer_target_files() {
+        let root = temp_dir("skill_migration");
+        let legacy = root.join("legacy");
+        let target = root.join("target");
+        fs::create_dir_all(legacy.join("custom-skill")).unwrap();
+        fs::create_dir_all(target.join("custom-skill")).unwrap();
+        fs::create_dir_all(legacy.join("second-skill")).unwrap();
+        fs::write(legacy.join("custom-skill/SKILL.md"), "legacy").unwrap();
+        fs::write(target.join("custom-skill/SKILL.md"), "newer").unwrap();
+        fs::write(legacy.join("second-skill/SKILL.md"), "second").unwrap();
+
+        migrate_legacy_skills(&legacy, &target).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(target.join("custom-skill/SKILL.md")).unwrap(),
+            "newer"
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("second-skill/SKILL.md")).unwrap(),
+            "second"
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn batch_skill_write_rolls_back_when_a_later_write_fails() {
+        let root = temp_dir("skill_transaction");
+        let first = root.join("first/SKILL.md");
+        fs::create_dir_all(first.parent().unwrap()).unwrap();
+        let impossible = root.join("missing-parent/SKILL.md");
+        let prepared = vec![
+            (first.clone(), "first".to_string()),
+            (impossible, "second".to_string()),
+        ];
+
+        assert!(write_prepared_skill_transaction(&prepared).is_err());
+        assert!(!first.exists(), "首项必须在后续写入失败时回滚");
+        fs::remove_dir_all(root).ok();
+    }
 
     // 用系统临时目录建唯一子目录,绝不碰真实 data/。
     fn temp_dir(tag: &str) -> PathBuf {

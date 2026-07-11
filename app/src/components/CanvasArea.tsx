@@ -21,7 +21,11 @@ import {
 import AgentNode from './AgentNode';
 import GateNode from './GateNode';
 import TimerNode from './TimerNode';
-import { useCanvasStore, type AgentNodeData } from '../stores/canvasStore';
+import {
+  canvasLimitMessage,
+  useCanvasStore,
+  type AgentNodeData,
+} from '../stores/canvasStore';
 import { useAgentStore } from '../stores/agentStore';
 import { uid } from '../lib/id';
 import { normalizeToolTags } from '../lib/toolTagMigration';
@@ -344,11 +348,13 @@ function Flow() {
 }
 
 function CanvasArea() {
+  const { message } = App.useApp();
   const activeId = useCanvasStore((s) => s.activeId);
   const hasActive = useCanvasStore((s) =>
     s.canvases.some((c) => c.id === s.activeId),
   );
   const addCanvas = useCanvasStore((s) => s.addCanvas);
+  const maxCanvases = useCanvasStore((s) => s.maxCanvases);
 
   if (!hasActive) {
     return (
@@ -359,7 +365,9 @@ function CanvasArea() {
           <Button
             type="primary"
             icon={<PlusOutlined />}
-            onClick={() => addCanvas()}
+            onClick={() => {
+              if (!addCanvas()) message.warning(canvasLimitMessage(maxCanvases));
+            }}
           >
             新建画布
           </Button>

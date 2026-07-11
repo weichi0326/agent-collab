@@ -17,6 +17,7 @@ import { normalizeToolTags } from '../lib/toolTagMigration';
 import { makeCanvas } from './canvas/naming';
 import { recomputeDerived } from './canvas/derived';
 import { recoverRunNodes, recoverRunState } from './canvas/runRecovery';
+import { clearOrchestratorRunDiagnosis } from '../lib/orchestratorBridge';
 import {
   cloneEdges,
   cloneRunNodes,
@@ -32,6 +33,7 @@ import {
   type AgentRunState,
   type Canvas,
   type CanvasRunState,
+  type CanvasOpenResult,
   type CreatedRun,
   type RunRecord,
   type SavedCanvas,
@@ -47,10 +49,12 @@ export type {
   Canvas,
   CanvasRunState,
   CanvasRunStatus,
+  CanvasOpenResult,
   CreatedRun,
   RunRecord,
   SavedCanvas,
 } from './canvas/types';
+export { canvasLimitMessage } from './canvas/types';
 export {
   outputFolderName,
   isDefaultCanvasName,
@@ -109,7 +113,7 @@ interface CanvasState {
 
   ensureCanvas: () => void;
   recoverInterruptedRuns: () => number;
-  addCanvas: () => void;
+  addCanvas: () => string | null;
   removeCanvas: (id: string) => void;
   renameCanvas: (id: string, name: string) => void;
   setActive: (id: string) => void;
@@ -141,7 +145,7 @@ interface CanvasState {
   saveActive: (name?: string) => void;
   saveActiveAsNew: (name: string) => void;
   saveAndClose: (id: string, name?: string) => void;
-  openSaved: (savedId: string) => void;
+  openSaved: (savedId: string) => CanvasOpenResult;
   deleteSaved: (savedId: string) => void;
   renameSaved: (savedId: string, name: string) => void;
   // 导入外部画布:重建为一张未保存的新 tab(无 savedId),画布数达上限返回 false。
@@ -154,7 +158,7 @@ interface CanvasState {
     paths: string[],
     runId?: string,
   ) => void;
-  openRun: (runId: string) => void;
+  openRun: (runId: string) => CanvasOpenResult;
   deleteRun: (runId: string) => void;
 }
 
@@ -211,12 +215,16 @@ export const useCanvasStore = create<CanvasState>()(
         return recoveredRunIds.size;
       },
 
-      addCanvas: () =>
+      addCanvas: () => {
+        let createdId: string | null = null;
         set((s) => {
           if (s.canvases.length >= MAX_CANVASES) return s;
           const c = makeCanvas(s.canvases);
+          createdId = c.id;
           return { canvases: [...s.canvases, c], activeId: c.id };
-        }),
+        });
+        return createdId;
+      },
 
       removeCanvas: (id) =>
         set((s) => {
@@ -577,11 +585,18 @@ export const useCanvasStore = create<CanvasState>()(
         }),
 
       // 若该已保存画布对应的 tab 已打开 -> 切换过去;否则新开一个 tab
-      openSaved: (savedId) =>
+      openSaved: (savedId) => {
+        let result: CanvasOpenResult = 'not-found';
         set((s) => {
           const existing = s.canvases.find((c) => c.savedId === savedId);
-          if (existing) return { activeId: existing.id };
-          if (s.canvases.length >= MAX_CANVASES) return s;
+          if (existing) {
+            result = 'activated';
+            return { activeId: existing.id };
+          }
+          if (s.canvases.length >= MAX_CANVASES) {
+            result = 'limit';
+            return s;
+          }
           const sc = s.savedCanvases.find((x) => x.id === savedId);
           if (!sc) return s;
           const d = recomputeDerived(
@@ -595,8 +610,11 @@ export const useCanvasStore = create<CanvasState>()(
             edges: d.edges,
             savedId: sc.id,
           };
+          result = 'opened';
           return { canvases: [...s.canvases, tab], activeId: tab.id };
-        }),
+        });
+        return result;
+      },
 
       importCanvas: (name, nodes, edges) => {
         if (get().canvases.length >= MAX_CANVASES) return false;
@@ -653,6 +671,7 @@ export const useCanvasStore = create<CanvasState>()(
         const tabId = uid('c');
         let created = false;
         set((s) => {
+          if (s.canvases.length >= MAX_CANVASES) return s;
           const canvas = s.canvases.find((c) => c.id === canvasId);
           if (!canvas) return s;
           const { record, tab } = createRunningArtifacts(
@@ -717,17 +736,25 @@ export const useCanvasStore = create<CanvasState>()(
 
       // 打开某条运行记录为只读快照 tab:已开则切过去;否则新开一个只读 tab。
       // 快照默认全展开(清 collapsed 再重算派生态),便于查看全图。
-      openRun: (runId) =>
+      openRun: (runId) => {
+        let result: CanvasOpenResult = 'not-found';
         set((s) => {
           const existing = s.canvases.find((c) => c.runId === runId);
-          if (existing) return { activeId: existing.id };
-          if (s.canvases.length >= MAX_CANVASES) return s;
+          if (existing) {
+            result = 'activated';
+            return { activeId: existing.id };
+          }
+          if (s.canvases.length >= MAX_CANVASES) {
+            result = 'limit';
+            return s;
+          }
           const rec = s.runHistory.find((r) => r.id === runId);
           if (!rec) return s;
           const recoveredRunState = recoverRunState(rec.runState);
           const recoveredNodes =
             rec.runState?.status === 'running' ? recoverRunNodes(rec.nodes) : rec.nodes;
           const tab = createRunSnapshotTab(rec, recoveredNodes, recoveredRunState);
+          result = 'opened';
           return {
             runHistory: s.runHistory.map((r) =>
               r.id === runId
@@ -737,7 +764,9 @@ export const useCanvasStore = create<CanvasState>()(
             canvases: [...s.canvases, tab],
             activeId: tab.id,
           };
-        }),
+        });
+        return result;
+      },
 
       // 删除运行记录;若其对应只读 tab 正打开则一并关闭
       deleteRun: (runId) => {
@@ -760,10 +789,8 @@ export const useCanvasStore = create<CanvasState>()(
           const { [openTab.id]: _dropped, ...history } = s.history;
           return { runHistory, canvases: list, activeId, history };
         });
-        // 运行删除后清掉编排层挂在该 run 上的失败去重键(动态 import 规避静态环)。
-        void import('./orchestratorStore')
-          .then((m) => m.useOrchestratorStore.getState().clearDiagnosedForRun(runId))
-          .catch((e) => console.error('[deleteRun] 清理诊断去重键失败', e));
+        // 运行删除后清掉编排层挂在该 run 上的失败去重键。
+        clearOrchestratorRunDiagnosis(runId);
       },
     }),
     {

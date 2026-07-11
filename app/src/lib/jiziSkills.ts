@@ -1,7 +1,23 @@
 import { isTauri, invoke } from '@tauri-apps/api/core';
 import { chat, type LLMConfig } from './llmClient';
 import { enabledJiziSkillIds } from '../stores/jiziSkillStore';
+import { useJiziSkillUsageStore } from '../stores/jiziSkillUsageStore';
 import { cleanJsonFence } from './masterPlanner';
+import workflowPlannerContent from '../../../jizi-agent-architecture/skills/workflow-planner/SKILL.md?raw';
+import agentConfigWriterContent from '../../../jizi-agent-architecture/skills/agent-config-writer/SKILL.md?raw';
+import failureDiagnosisContent from '../../../jizi-agent-architecture/skills/failure-diagnosis/SKILL.md?raw';
+import toolGenerationReviewContent from '../../../jizi-agent-architecture/skills/tool-generation-review/SKILL.md?raw';
+import modelRoutingAdvisorContent from '../../../jizi-agent-architecture/skills/model-routing-advisor/SKILL.md?raw';
+import skillCreatorContent from '../../../jizi-agent-architecture/skills/skill-creator/SKILL.md?raw';
+import {
+  assertSkillTextLimits,
+  type JiziSkillCategory,
+  parseSkillDocument,
+  sliceUnicode,
+  skillFrontmatterList,
+  skillFrontmatterValue,
+  unicodeLength,
+} from './jiziSkillFormat';
 
 const SKILL_CONTEXT_CHAR_LIMIT = 18_000;
 
@@ -13,14 +29,14 @@ export interface JiziSkillFile {
 
 export interface JiziSkill {
   id: string;
-  name: string;
   title: string;
   description: string;
-  displayTitle?: string;
-  displayDescription?: string;
+  category: JiziSkillCategory;
   capabilities: string[];
   instructions: string;
   path?: string;
+  legacyFormat?: boolean;
+  rawContent?: string;
 }
 
 export interface SelectedJiziSkill {
@@ -31,85 +47,89 @@ export interface SelectedJiziSkill {
 export interface JiziSkillContext {
   block: string;
   selected: SelectedJiziSkill[];
+  selectionWarning?: string;
 }
+
+export function fitJiziSkillContext(
+  selected: SelectedJiziSkill[],
+  limit = SKILL_CONTEXT_CHAR_LIMIT,
+): Pick<JiziSkillContext, 'block' | 'selected'> {
+  const header = [
+    '【姬子本轮自动选用的 skill】',
+    '下面是本轮任务需要参考的做事方法。只在相关时使用，不要向用户生硬复述 skill 名称。',
+  ];
+  const blocks: string[] = [];
+  const included: SelectedJiziSkill[] = [];
+  let total = unicodeLength(header.join('\n\n'));
+
+  for (const item of selected) {
+    const { skill, reason } = item;
+    const block = [
+      `## ${skill.title} (${skill.id})`,
+      reason ? `选择原因：${reason}` : '',
+      skill.capabilities.length > 0
+        ? `具体能力：\n${skill.capabilities.map((capability) => `- ${capability}`).join('\n')}`
+        : '',
+      skill.instructions,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const remaining = limit - total;
+    if (remaining <= 0) break;
+    const fittedBlock = unicodeLength(block) > remaining
+      ? `${sliceUnicode(block, Math.max(0, remaining - 12))}\n...(已截断)`
+      : block;
+    if (!fittedBlock.trim()) break;
+    blocks.push(fittedBlock);
+    included.push(item);
+    total += unicodeLength(fittedBlock);
+  }
+  return { block: [...header, ...blocks].join('\n\n'), selected: included };
+}
+
+interface SkillSelectionResult {
+  selected: SelectedJiziSkill[];
+  warning?: string;
+}
+
+const selectionCache = new Map<string, { expiresAt: number; selectedIds: string[] }>();
+const SKILL_SELECTION_CACHE_MS = 30_000;
 
 const BUILTIN_SKILL_FILES: JiziSkillFile[] = [
   {
     id: 'workflow-planner',
     path: '',
-    content: `---
-name: workflow-planner
-description: Plan canvas workflows for the multi-agent desktop app. Use when the user wants to design, explain, or improve a canvas made of Agent nodes, tool nodes, gate nodes, and data flow connections.
-display_title: 工作流规划
-display_description: 帮你把目标拆成画布流程，规划 Agent 节点、工具节点、门控节点和数据流。
-capabilities: 拆解目标 | 规划画布节点 | 说明数据流
----
-
-# Workflow Planner
-
-Help users turn a goal into a small runnable canvas workflow. Restate the goal, identify inputs, propose Agent nodes, explain data flow, and call out manual configuration needs.`,
+    content: workflowPlannerContent,
   },
   {
     id: 'agent-config-writer',
     path: '',
-    content: `---
-name: agent-config-writer
-description: Write practical Agent configurations for the multi-agent app. Use when the user asks for Agent names, descriptions, system prompts, tool tags, output formats, or model choices.
-display_title: Agent 配置编写
-display_description: 帮你编写 Agent 名称、职责说明、系统提示词、工具标签、输出格式和模型建议。
-capabilities: 编写 Agent 提示词 | 建议工具标签 | 设计输出格式
----
-
-# Agent Config Writer
-
-Create clear Agent names, descriptions, prompts, tool tags, output formats, and model capability notes that can be pasted into the app.`,
+    content: agentConfigWriterContent,
   },
   {
     id: 'failure-diagnosis',
     path: '',
-    content: `---
-name: failure-diagnosis
-description: Diagnose failed canvas nodes in the multi-agent app. Use when a node, tool call, model call, file read/write, Python service, or workflow run fails and the user wants a practical explanation and next step.
-display_title: 失败诊断
-display_description: 当节点、工具、模型、文件或 Python 服务出错时，帮你判断原因、影响和最省事的修法。
-capabilities: 判断失败原因 | 说明实际影响 | 给出低成本修复步骤
----
-
-# Failure Diagnosis
-
-Classify the likely cause, explain the consequence in plain language, give the cheapest check first, and separate user-fixable steps from developer fixes.`,
+    content: failureDiagnosisContent,
   },
   {
     id: 'tool-generation-review',
     path: '',
-    content: `---
-name: tool-generation-review
-description: Generate and review custom Python tools for the multi-agent app. Use when built-in tools do not cover a task and the user wants a new tool, or when failure diagnosis suggests a missing tool/library.
-display_title: 工具生成审阅
-display_description: 当现有工具不够用时，帮你整理工具需求、依赖和安全边界，生成候选工具前先把关。
-capabilities: 整理工具需求 | 检查依赖与安全边界 | 审阅候选工具
----
-
-# Tool Generation Review
-
-Define tool contract, dependencies, code safety boundaries, and review steps. Never install unreviewed generated code.`,
+    content: toolGenerationReviewContent,
   },
   {
     id: 'model-routing-advisor',
     path: '',
-    content: `---
-name: model-routing-advisor
-description: Advise model/provider choices for the multi-agent app. Use when the user asks which LLM to use for long documents, images, reasoning, low cost, speed, or fallback routing.
-display_title: 模型选择建议
-display_description: 根据长文本、图片、推理、速度、成本等需求，帮你判断该选哪类模型。
-capabilities: 匹配任务和模型能力 | 判断成本速度取舍 | 设计备用模型路线
----
-
-# Model Routing Advisor
-
-Match tasks to capabilities such as long context, vision, reasoning, speed, and cost. Do not invent configured models or pricing.`,
+    content: modelRoutingAdvisorContent,
+  },
+  {
+    id: 'skill-creator',
+    path: '',
+    content: skillCreatorContent,
   },
 ];
+
+export const BUILTIN_JIZI_SKILL_IDS = BUILTIN_SKILL_FILES.map((file) => file.id);
+const BUILTIN_JIZI_SKILL_ID_SET = new Set(BUILTIN_JIZI_SKILL_IDS);
 
 function titleFromName(name: string): string {
   return name
@@ -119,76 +139,92 @@ function titleFromName(name: string): string {
     .join(' ');
 }
 
-function frontmatterValue(frontmatter: string, key: string): string {
-  const pattern = new RegExp(`^${key}:\\s*(.+)$`, 'm');
-  const match = frontmatter.match(pattern);
-  return match?.[1]?.trim().replace(/^['"]|['"]$/g, '') ?? '';
-}
-
-function frontmatterList(frontmatter: string, key: string): string[] {
-  const raw = frontmatterValue(frontmatter, key);
-  if (!raw) return [];
-  return raw
-    .split('|')
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 export function parseJiziSkillFile(file: JiziSkillFile): JiziSkill | null {
-  const text = file.content.trim();
-  const match = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-  if (!match) return null;
+  const parsed = parseSkillDocument(file.content);
+  if (!parsed) return null;
 
-  const frontmatter = match[1] ?? '';
-  const body = (match[2] ?? '').trim();
-  const name = frontmatterValue(frontmatter, 'name') || file.id;
-  const description = frontmatterValue(frontmatter, 'description');
-  const displayTitle = frontmatterValue(frontmatter, 'display_title');
-  const displayDescription = frontmatterValue(frontmatter, 'display_description');
-  const capabilities = frontmatterList(frontmatter, 'capabilities');
-  if (!name || !description || !body) return null;
+  const { frontmatter, body } = parsed;
+  const index =
+    skillFrontmatterValue(frontmatter, 'index') ||
+    skillFrontmatterValue(frontmatter, 'name') ||
+    file.id;
+  const newTitle = skillFrontmatterValue(frontmatter, 'title');
+  const newDescription = skillFrontmatterValue(frontmatter, 'description');
+  const displayTitle = skillFrontmatterValue(frontmatter, 'display_title');
+  const displayDescription = skillFrontmatterValue(frontmatter, 'display_description');
+  const legacyFormat =
+    !!skillFrontmatterValue(frontmatter, 'name') ||
+    !!displayTitle ||
+    !!displayDescription ||
+    !skillFrontmatterValue(frontmatter, 'index') ||
+    !newTitle;
+  const title = newTitle || displayTitle || titleFromName(index);
+  const description = displayDescription || newDescription;
+  const categoryValue = skillFrontmatterValue(frontmatter, 'category');
+  const category: JiziSkillCategory =
+    categoryValue === 'tool' ||
+    categoryValue === 'diagnosis' ||
+    categoryValue === 'model' ||
+    categoryValue === 'skill'
+      ? categoryValue
+      : 'workflow';
+  const capabilities = skillFrontmatterList(frontmatter, 'capabilities');
+  if (!index || !title || !description || !body) return null;
 
   return {
-    id: file.id || name,
-    name,
-    title: displayTitle || titleFromName(name),
+    id: file.id || index,
+    title,
     description,
-    displayTitle: displayTitle || undefined,
-    displayDescription: displayDescription || undefined,
+    category,
     capabilities,
     instructions: body,
     path: file.path || undefined,
+    legacyFormat,
+    rawContent: file.content,
   };
 }
 
 async function readSkillFiles(): Promise<JiziSkillFile[]> {
-  if (!isTauri()) return BUILTIN_SKILL_FILES;
-  const files = await invoke<JiziSkillFile[]>('list_jizi_skill_files');
-  return files.length > 0 ? files : BUILTIN_SKILL_FILES;
+  if (!isTauri()) return [];
+  return invoke<JiziSkillFile[]>('list_jizi_skill_files');
+}
+
+export function mergeJiziSkillFiles(files: JiziSkillFile[]): JiziSkill[] {
+  const merged = new Map<string, JiziSkill>();
+  for (const file of BUILTIN_SKILL_FILES) {
+    const skill = parseJiziSkillFile(file);
+    if (skill) merged.set(skill.id, skill);
+  }
+  for (const file of files) {
+    const skill = parseJiziSkillFile(file);
+    if (skill) merged.set(skill.id, skill);
+  }
+  return [...merged.values()];
 }
 
 export async function loadJiziSkills(): Promise<JiziSkill[]> {
   try {
-    return (await readSkillFiles())
-      .map(parseJiziSkillFile)
-      .filter((skill): skill is JiziSkill => !!skill);
+    return mergeJiziSkillFiles(await readSkillFiles());
   } catch (err) {
     console.warn('[jiziSkills] failed to load skill files, using built-ins', err);
-    return BUILTIN_SKILL_FILES.map(parseJiziSkillFile).filter(
-      (skill): skill is JiziSkill => !!skill,
-    );
+    return mergeJiziSkillFiles([]);
   }
+}
+
+export async function loadJiziSkillById(id: string): Promise<JiziSkill | undefined> {
+  const skills = await loadJiziSkills();
+  return skills.find((skill) => skill.id === id);
 }
 
 export async function saveJiziSkill(input: {
   id: string;
-  displayTitle: string;
-  displayDescription: string;
-  modelName: string;
-  modelDescription: string;
+  title: string;
+  description: string;
+  category: JiziSkillCategory;
   capabilities: string[];
   instructions: string;
 }): Promise<void> {
+  assertSkillTextLimits(input);
   if (!isTauri()) {
     throw new Error('创建 skill 需要在桌面应用中使用');
   }
@@ -198,22 +234,50 @@ export async function saveJiziSkill(input: {
 // 覆盖已有 skill:同名直接写入,替换旧内容。用于导入时用户选择"覆盖"。
 export async function overwriteJiziSkill(input: {
   id: string;
-  displayTitle: string;
-  displayDescription: string;
-  modelName: string;
-  modelDescription: string;
+  title: string;
+  description: string;
+  category: JiziSkillCategory;
   capabilities: string[];
   instructions: string;
 }): Promise<void> {
+  assertSkillTextLimits(input);
   if (!isTauri()) {
     throw new Error('覆盖 skill 需要在桌面应用中使用');
   }
   await invoke('overwrite_jizi_skill_file', input);
 }
 
-// 判断是否为内置 skill(5 个):内置 skill 的 path 为空字符串。
-export function isBuiltinSkill(skill: Pick<JiziSkill, 'path'> | undefined): boolean {
-  return !skill?.path;
+export interface JiziSkillWriteInput {
+  id: string;
+  title: string;
+  description: string;
+  category: JiziSkillCategory;
+  capabilities: string[];
+  instructions: string;
+  overwrite: boolean;
+}
+
+export async function writeJiziSkills(items: JiziSkillWriteInput[]): Promise<void> {
+  for (const item of items) assertSkillTextLimits(item);
+  if (!isTauri()) throw new Error('写入 skill 需要在桌面应用中使用');
+  await invoke('write_jizi_skill_files', { items });
+}
+
+export async function deleteJiziSkill(id: string): Promise<void> {
+  if (!isTauri()) throw new Error('删除 skill 需要在桌面应用中使用');
+  await invoke('delete_jizi_skill_file', { id });
+}
+
+export function hasSkillOverride(skill: JiziSkill): boolean {
+  return !!skill.path;
+}
+
+// 内置身份由稳定 ID 决定；同 ID 的磁盘文件只是覆盖内容，不会改变其内置身份。
+export function isBuiltinSkill(
+  skill: Pick<JiziSkill, 'id'> | string | undefined,
+): boolean {
+  const id = typeof skill === 'string' ? skill : skill?.id;
+  return !!id && BUILTIN_JIZI_SKILL_ID_SET.has(id);
 }
 
 function buildSelectionPrompt(userText: string, skills: JiziSkill[]): string {
@@ -222,8 +286,8 @@ function buildSelectionPrompt(userText: string, skills: JiziSkill[]): string {
       (skill) =>
         [
           `- id: ${skill.id}`,
-          `  name: ${skill.name}`,
-          `  description: ${skill.description}`,
+          `  名称: ${skill.title}`,
+          `  描述: ${skill.description}`,
           skill.capabilities.length > 0
             ? `  capabilities: ${skill.capabilities.join(' | ')}`
             : '',
@@ -287,28 +351,55 @@ export async function selectJiziSkills(
   signal?: AbortSignal,
   limit?: number,
 ): Promise<SelectedJiziSkill[]> {
+  return (await selectJiziSkillsDetailed(text, cfg, model, signal, limit)).selected;
+}
+
+async function selectJiziSkillsDetailed(
+  text: string,
+  cfg: LLMConfig,
+  model: string,
+  signal?: AbortSignal,
+  limit?: number,
+): Promise<SkillSelectionResult> {
   const normalized = text.trim();
-  if (!normalized) return [];
+  if (!normalized) return { selected: [] };
 
   const skills = await loadJiziSkills();
   const enabledIds = new Set(enabledJiziSkillIds(skills.map((skill) => skill.id)));
   const enabledSkills = skills.filter((skill) => enabledIds.has(skill.id));
-  if (enabledSkills.length === 0) return [];
+  if (enabledSkills.length === 0) return { selected: [] };
 
-  const reply = await chat({
-    cfg,
-    model,
-    system: '你只负责选择 skill，只输出 JSON。',
-    text: buildSelectionPrompt(normalized, enabledSkills),
-    signal,
-    scene: 'skill-select',
-  });
+  const cacheKey = `${model}\n${enabledSkills.map((skill) => skill.id).join(',')}\n${normalized}`;
+  const cached = selectionCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    const byId = new Map(enabledSkills.map((skill) => [skill.id, skill]));
+    return {
+      selected: cached.selectedIds
+        .map((id) => byId.get(id))
+        .filter((skill): skill is JiziSkill => !!skill)
+        .map((skill) => ({ skill, reason: '复用近期相同请求的选择结果' })),
+    };
+  }
 
   try {
-    return parseSkillSelectionReply(reply, enabledSkills, limit);
+    const reply = await chat({
+      cfg,
+      model,
+      system: '你只负责选择 skill，只输出 JSON。',
+      text: buildSelectionPrompt(normalized, enabledSkills),
+      signal,
+      scene: 'skill-select',
+    });
+    const selected = parseSkillSelectionReply(reply, enabledSkills, limit);
+    selectionCache.set(cacheKey, {
+      expiresAt: Date.now() + SKILL_SELECTION_CACHE_MS,
+      selectedIds: selected.map((item) => item.skill.id),
+    });
+    return { selected };
   } catch (err) {
-    console.warn('[jiziSkills] failed to parse skill selection', err);
-    return [];
+    const warning = err instanceof Error ? err.message : '未知错误';
+    console.warn('[jiziSkills] skill selection failed', err);
+    return { selected: [], warning: `Skill 选择失败：${warning}` };
   }
 }
 
@@ -317,38 +408,30 @@ export async function buildJiziSkillContext(
   cfg: LLMConfig,
   model: string,
   signal?: AbortSignal,
+  options?: { requiredIds?: string[]; autoSelect?: boolean },
 ): Promise<JiziSkillContext> {
-  const selected = await selectJiziSkills(text, cfg, model, signal);
-  if (selected.length === 0) return { block: '', selected: [] };
-
-  const header = [
-    '【姬子本轮自动选用的 skill】',
-    '下面是本轮任务需要参考的做事方法。只在相关时使用，不要向用户生硬复述 skill 名称。',
-  ];
-  const blocks: string[] = [];
-  const included: SelectedJiziSkill[] = [];
-  let total = header.join('\n\n').length;
-
-  for (const item of selected) {
-    const { skill, reason } = item;
-    const block = [
-      `## ${skill.title} (${skill.id})`,
-      reason ? `选择原因：${reason}` : '',
-      skill.capabilities.length > 0
-        ? `具体能力：\n${skill.capabilities.map((capability) => `- ${capability}`).join('\n')}`
-        : '',
-      skill.instructions,
-    ]
-      .filter(Boolean)
-      .join('\n');
-    if (blocks.length > 0 && total + block.length > SKILL_CONTEXT_CHAR_LIMIT) break;
-    blocks.push(block);
-    included.push(item);
-    total += block.length;
+  const skills = await loadJiziSkills();
+  const enabledIds = new Set(enabledJiziSkillIds(skills.map((skill) => skill.id)));
+  const required = (options?.requiredIds ?? [])
+    .map((id) => skills.find((skill) => skill.id === id))
+    .filter((skill): skill is JiziSkill => !!skill && enabledIds.has(skill.id))
+    .map((skill) => ({ skill, reason: '当前功能固定需要' }));
+  const selection = options?.autoSelect === false
+    ? { selected: [] as SelectedJiziSkill[] }
+    : await selectJiziSkillsDetailed(text, cfg, model, signal);
+  const automatic = selection.selected;
+  const selected = [...required, ...automatic].filter(
+    (item, index, items) => items.findIndex((other) => other.skill.id === item.skill.id) === index,
+  );
+  if (selected.length === 0) {
+    return { block: '', selected: [], selectionWarning: selection.warning };
   }
 
-  const block = [...header, ...blocks].join('\n\n');
-  return { block, selected: included };
+  const fitted = fitJiziSkillContext(selected);
+  for (const item of fitted.selected) {
+    useJiziSkillUsageStore.getState().record(item.skill.id, item.reason);
+  }
+  return { ...fitted, selectionWarning: selection.warning };
 }
 
 export async function buildJiziSkillSystemBlock(
@@ -356,6 +439,7 @@ export async function buildJiziSkillSystemBlock(
   cfg: LLMConfig,
   model: string,
   signal?: AbortSignal,
+  options?: { requiredIds?: string[]; autoSelect?: boolean },
 ): Promise<string> {
-  return (await buildJiziSkillContext(text, cfg, model, signal)).block;
+  return (await buildJiziSkillContext(text, cfg, model, signal, options)).block;
 }

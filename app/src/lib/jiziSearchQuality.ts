@@ -14,15 +14,37 @@ function asObject(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function parseQualityReply(reply: string, results: SearchResult[]): SearchQualityReport {
-  const root = asObject(JSON.parse(cleanJsonFence(reply)));
-  const indexes = Array.isArray(root?.keep)
-    ? root.keep
-        .map((item) => Number(item))
-        .filter((item) => Number.isInteger(item) && item >= 1 && item <= results.length)
-    : [];
+function fallbackQualityReport(results: SearchResult[]): SearchQualityReport {
+  const kept = results.slice(0, 3);
+  return {
+    kept,
+    summary: '搜索结果质检返回异常，已保留前几条结果。',
+    droppedCount: Math.max(0, results.length - kept.length),
+  };
+}
+
+export function parseQualityReply(reply: string, results: SearchResult[]): SearchQualityReport {
+  let root: Record<string, unknown> | null;
+  try {
+    root = asObject(JSON.parse(cleanJsonFence(reply)));
+  } catch {
+    return fallbackQualityReport(results);
+  }
+  if (!root || !Array.isArray(root.keep)) return fallbackQualityReport(results);
+  if (
+    root.keep.some(
+      (item) =>
+        typeof item !== 'number' ||
+        !Number.isInteger(item) ||
+        item < 1 ||
+        item > results.length,
+    )
+  ) {
+    return fallbackQualityReport(results);
+  }
+  const indexes = root.keep as number[];
   const unique = Array.from(new Set(indexes));
-  const kept = unique.length > 0 ? unique.map((index) => results[index - 1]) : results.slice(0, 3);
+  const kept = unique.map((index) => results[index - 1]);
   const summary = typeof root?.summary === 'string' && root.summary.trim()
     ? root.summary.trim()
     : '已筛掉明显不相关或低价值的搜索结果。';
@@ -70,10 +92,6 @@ export async function assessSearchResultsWithLLM(params: {
     });
     return parseQualityReply(reply, results);
   } catch {
-    return {
-      kept: results.slice(0, 5),
-      summary: '搜索结果质检失败，已保留前几条结果。',
-      droppedCount: Math.max(0, results.length - 5),
-    };
+    return fallbackQualityReport(results);
   }
 }

@@ -8,12 +8,13 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "opener:default",
-    "opener:allow-open-path",
     "window-state:default",
     {
       "identifier": "http:default",
       "allow": [
+        { "url": "https://*/*" },
+        { "url": "http://localhost:*/*" },
+        { "url": "http://127.0.0.1:*/*" },
         { "url": "https://api.tavily.com/*" },
         { "url": "https://api.search.brave.com/*" },
         { "url": "https://google.serper.dev/*" },

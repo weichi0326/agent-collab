@@ -9,7 +9,7 @@ import {
   ClockCircleOutlined,
 } from '@ant-design/icons';
 import type { Node } from '@xyflow/react';
-import { useCanvasStore } from '../stores/canvasStore';
+import { canvasLimitMessage, useCanvasStore } from '../stores/canvasStore';
 import { useAgentStore } from '../stores/agentStore';
 import { uid } from '../lib/id';
 import { normalizeToolTags } from '../lib/toolTagMigration';
@@ -103,12 +103,10 @@ function CommandPalette() {
         message.info('该运行记录较早,仅保留摘要信息,不可回看快照');
         return;
       }
-      if (canvases.length >= maxCanvases) {
-        message.warning(`最多只能同时打开 ${maxCanvases} 个画布,请先关闭一个`);
-        return;
-      }
     }
-    openRun(runId);
+    const result = openRun(runId);
+    if (result === 'limit') message.warning(canvasLimitMessage(maxCanvases));
+    else if (result === 'not-found') message.warning('该运行记录不存在或无法回看');
   };
 
   const commands = useMemo<Command[]>(() => {
@@ -120,11 +118,7 @@ function CommandPalette() {
       keywords: '新建画布 new canvas',
       icon: <FileAddOutlined />,
       run: () => {
-        if (canvases.length >= maxCanvases) {
-          message.warning(`最多只能同时打开 ${maxCanvases} 个画布`);
-          return;
-        }
-        addCanvas();
+        if (!addCanvas()) message.warning(canvasLimitMessage(maxCanvases));
       },
     });
     list.push({

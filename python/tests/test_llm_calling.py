@@ -11,15 +11,34 @@ from tools import llm_calling
 
 
 class LlmCallingRetryTests(unittest.TestCase):
-    def test_public_non_allowlisted_base_url_is_rejected(self):
-        with patch.object(llm_calling.socket, "gethostbyname", return_value="93.184.216.34"):
-            with self.assertRaisesRegex(ValueError, "不在允许列表"):
-                llm_calling._validate_base_url("https://attacker.example/v1")
+    def test_public_custom_https_base_url_is_allowed(self):
+        resolved = [(None, None, None, None, ("93.184.216.34", 443))]
+        with patch.object(llm_calling.socket, "getaddrinfo", return_value=resolved):
+            self.assertEqual(
+                llm_calling._validate_base_url("https://trusted.example/v1"),
+                "https://trusted.example/v1",
+            )
 
     def test_allowlisted_base_url_is_allowed(self):
+        resolved = [(None, None, None, None, ("8.8.8.8", 443))]
+        with patch.object(llm_calling.socket, "getaddrinfo", return_value=resolved):
+            self.assertEqual(
+                llm_calling._validate_base_url("https://api.deepseek.com/v1"),
+                "https://api.deepseek.com/v1",
+            )
+
+    def test_private_dns_result_and_public_http_are_rejected(self):
+        resolved = [(None, None, None, None, ("10.0.0.8", 443))]
+        with patch.object(llm_calling.socket, "getaddrinfo", return_value=resolved):
+            with self.assertRaisesRegex(ValueError, "私网"):
+                llm_calling._validate_base_url("https://internal.example/v1")
+        with self.assertRaisesRegex(ValueError, "HTTPS"):
+            llm_calling._validate_base_url("http://public.example/v1")
+
+    def test_explicit_localhost_service_is_allowed(self):
         self.assertEqual(
-            llm_calling._validate_base_url("https://api.deepseek.com/v1"),
-            "https://api.deepseek.com/v1",
+            llm_calling._validate_base_url("http://localhost:11434/v1"),
+            "http://localhost:11434/v1",
         )
 
     def test_chunked_encoding_error_is_transient(self):
@@ -41,6 +60,7 @@ class LlmCallingRetryTests(unittest.TestCase):
         first.raise_for_status.side_effect = requests.HTTPError(response=first)
 
         second = Mock()
+        second.status_code = 200
         second.raise_for_status.return_value = None
         second.json.return_value = {"ok": True}
 
@@ -52,6 +72,7 @@ class LlmCallingRetryTests(unittest.TestCase):
 
     def test_non_json_response_becomes_runtime_error(self):
         response = Mock()
+        response.status_code = 200
         response.raise_for_status.return_value = None
         response.json.side_effect = ValueError("not json")
 

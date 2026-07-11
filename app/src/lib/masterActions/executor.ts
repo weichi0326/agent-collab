@@ -2,7 +2,7 @@
 import { uid } from '../id';
 import { runCanvas, rerunCanvasNode } from '../agentRunner';
 import { useAgentStore } from '../../stores/agentStore';
-import { useCanvasStore } from '../../stores/canvasStore';
+import { canvasLimitMessage, useCanvasStore } from '../../stores/canvasStore';
 import { useToolStore } from '../../stores/toolStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useModelStore } from '../../stores/modelStore';
@@ -43,8 +43,8 @@ export async function executeMasterAction(
   }
 
   if (action.type === 'create-canvas') {
-    canvasStore.addCanvas();
-    const createdId = useCanvasStore.getState().activeId;
+    const createdId = canvasStore.addCanvas();
+    if (!createdId) throw new Error(canvasLimitMessage(canvasStore.maxCanvases));
     if (action.name && createdId) {
       useCanvasStore.getState().renameCanvas(createdId, action.name);
     }
@@ -52,9 +52,8 @@ export async function executeMasterAction(
   }
 
   if (action.type === 'create-workflow-canvas') {
-    canvasStore.addCanvas();
-    const createdId = useCanvasStore.getState().activeId;
-    if (!createdId) throw new Error('创建画布失败');
+    const createdId = canvasStore.addCanvas();
+    if (!createdId) throw new Error(canvasLimitMessage(canvasStore.maxCanvases));
     if (action.name) {
       useCanvasStore.getState().renameCanvas(createdId, action.name);
     }

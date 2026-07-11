@@ -4,10 +4,10 @@
 //! 使用 std::process::Command，无需额外 Tauri 插件。
 
 use std::fs::{self, File, OpenOptions};
-use std::path::PathBuf;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
-use std::net::{TcpStream, SocketAddr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MAX_RESTARTS: u8 = 3;
@@ -47,10 +47,99 @@ const PYTHON_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 pub struct PythonState {
     child: Option<Child>,
     restart_attempts: u8,
+    user_tools_dir: Option<PathBuf>,
 }
 
 /// Tauri managed state：持有 Python 子进程的句柄与重启计数。
 pub struct PythonProcess(pub Mutex<PythonState>);
+
+pub fn configure_user_tools_dir(state: &PythonProcess, dir: PathBuf) -> Result<(), String> {
+    fs::create_dir_all(&dir).map_err(|e| format!("创建用户工具目录失败: {e}"))?;
+    let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    guard.user_tools_dir = Some(dir);
+    Ok(())
+}
+
+fn is_forbidden_ipv4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || a == 0
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 192 && b == 0)
+        || (a == 198 && (b == 18 || b == 19))
+        || (a == 203 && b == 0 && c == 113)
+        || a >= 240
+}
+
+fn is_forbidden_ipv6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || (segments[0] & 0xfe00) == 0xfc00
+        || (segments[0] & 0xffc0) == 0xfe80
+        || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+        || ip.to_ipv4().is_some_and(is_forbidden_ipv4)
+}
+
+fn is_forbidden_model_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(value) => is_forbidden_ipv4(value),
+        IpAddr::V6(value) => is_forbidden_ipv6(value),
+    }
+}
+
+fn validate_model_host_inner(hostname: &str, port: u16, allow_local: bool) -> Result<(), String> {
+    let hostname = hostname.trim().trim_matches(['[', ']']).to_lowercase();
+    let local = matches!(hostname.as_str(), "localhost" | "127.0.0.1");
+    if local {
+        return if allow_local {
+            Ok(())
+        } else {
+            Err("模型地址不允许访问本机服务".to_string())
+        };
+    }
+    if hostname.is_empty() || port == 0 {
+        return Err("模型地址缺少有效主机名或端口".to_string());
+    }
+
+    let addresses = (hostname.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|_| format!("模型地址主机名无法解析: {hostname}"))?
+        .collect::<Vec<_>>();
+    if addresses.is_empty() {
+        return Err(format!("模型地址主机名没有可用 IP: {hostname}"));
+    }
+    if let Some(address) = addresses
+        .iter()
+        .find(|address| is_forbidden_model_ip(address.ip()))
+    {
+        return Err(format!(
+            "模型地址解析到私网、回环、链路本地或保留 IP，已拒绝: {}",
+            address.ip()
+        ));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn validate_model_host(
+    hostname: String,
+    port: u16,
+    allow_local: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_model_host_inner(&hostname, port, allow_local)
+    })
+    .await
+    .map_err(|e| format!("模型地址 DNS 校验任务失败: {e}"))?
+}
 
 /// L26 修复：抽取公共项目根目录定位逻辑，消除 find_python_exe/find_app_dir 的重复代码。
 /// - dev 模式（debug_assertions）：CARGO_MANIFEST_DIR 上溯两级到项目根
@@ -85,7 +174,11 @@ fn find_python_exe() -> Option<PathBuf> {
             python_root.join("runtime").join("bin").join("python3")
         }
     };
-    if python.exists() { Some(python) } else { None }
+    if python.exists() {
+        Some(python)
+    } else {
+        None
+    }
 }
 
 /// 拼接 python/app.py 所在目录（FastAPI 的 --app-dir 参数）。
@@ -130,9 +223,7 @@ fn is_service_port_open() -> bool {
 
 #[cfg(target_os = "windows")]
 fn listener_pids_on_port(port: &str) -> Vec<u32> {
-    let output = Command::new("netstat")
-        .args(["-ano", "-p", "tcp"])
-        .output();
+    let output = Command::new("netstat").args(["-ano", "-p", "tcp"]).output();
     let text = match output {
         Ok(out) => String::from_utf8_lossy(&out.stdout).to_string(),
         Err(e) => {
@@ -162,9 +253,22 @@ fn listener_pids_on_port(port: &str) -> Vec<u32> {
 }
 
 #[cfg(target_os = "windows")]
-fn command_line_for_pid(pid: u32) -> Option<String> {
+struct ProcessIdentity {
+    executable_path: PathBuf,
+    command_line: String,
+}
+
+#[cfg(target_os = "windows")]
+fn process_identity_for_pid(pid: u32) -> Option<ProcessIdentity> {
     let script = format!(
-        "(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\").CommandLine"
+        concat!(
+            "$p=Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\";",
+            "if($null -ne $p){{",
+            "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;",
+            "Write-Output ('EXE='+$p.ExecutablePath);",
+            "Write-Output ('CMD='+$p.CommandLine)}}"
+        ),
+        pid = pid,
     );
     let output = Command::new("powershell")
         .args(["-NoProfile", "-Command", &script])
@@ -173,28 +277,128 @@ fn command_line_for_pid(pid: u32) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let executable_path = text
+        .lines()
+        .find_map(|line| line.strip_prefix("EXE="))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())?;
+    let command_line = text
+        .lines()
+        .find_map(|line| line.strip_prefix("CMD="))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())?;
+    Some(ProcessIdentity {
+        executable_path: PathBuf::from(executable_path),
+        command_line: command_line.to_string(),
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn path_key(path: &Path) -> String {
+    let normalized = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    normalized
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .replace('/', "\\")
+        .to_lowercase()
+}
+
+#[cfg(target_os = "windows")]
+fn command_line_tokens(command_line: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    for character in command_line.chars() {
+        match character {
+            '"' => quoted = !quoted,
+            value if value.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            value => current.push(value),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+#[cfg(target_os = "windows")]
+fn command_arg_value(tokens: &[String], flag: &str) -> Option<String> {
+    tokens
+        .windows(2)
+        .find(|pair| pair[0].eq_ignore_ascii_case(flag))
+        .map(|pair| pair[1].clone())
+}
+
+#[cfg(target_os = "windows")]
+fn matches_service_identity(
+    identity: &ProcessIdentity,
+    expected_exe: &Path,
+    expected_app_dir: &Path,
+) -> bool {
+    if path_key(&identity.executable_path) != path_key(expected_exe) {
+        return false;
+    }
+    let tokens = command_line_tokens(&identity.command_line);
+    let exact_module = tokens.windows(3).any(|args| {
+        args[0] == "-m"
+            && args[1].eq_ignore_ascii_case("uvicorn")
+            && args[2].eq_ignore_ascii_case("app:app")
+    });
+    let app_dir = command_arg_value(&tokens, "--app-dir");
+    let port = command_arg_value(&tokens, "--port");
+    exact_module
+        && port.as_deref() == Some(PYTHON_PORT)
+        && app_dir
+            .as_deref()
+            .map(Path::new)
+            .map(path_key)
+            .is_some_and(|value| value == path_key(expected_app_dir))
+}
+
+#[cfg(target_os = "windows")]
+fn is_our_python_listener_on_port() -> bool {
+    let (Some(expected_exe), Some(expected_app_dir)) = (find_python_exe(), find_app_dir()) else {
+        return false;
+    };
+    listener_pids_on_port(PYTHON_PORT).into_iter().any(|pid| {
+        process_identity_for_pid(pid)
+            .map(|identity| matches_service_identity(&identity, &expected_exe, &expected_app_dir))
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_our_python_listener_on_port() -> bool {
+    false
 }
 
 #[cfg(target_os = "windows")]
 pub fn stop_orphan_python_listeners() {
     let current_pid = std::process::id();
+    let (Some(expected_exe), Some(expected_app_dir)) = (find_python_exe(), find_app_dir()) else {
+        log::warn!("[python_manager] 无法定位本项目 Python 身份，跳过孤儿进程清理");
+        return;
+    };
     for pid in listener_pids_on_port(PYTHON_PORT) {
         if pid == current_pid {
             continue;
         }
-        let cmdline = command_line_for_pid(pid).unwrap_or_default();
-        let lower = cmdline.to_lowercase();
-        let looks_like_our_service =
-            lower.contains("uvicorn")
-                && lower.contains("app:app")
-                && lower.contains("--port")
-                && lower.contains(PYTHON_PORT);
-
-        if !looks_like_our_service {
+        let identity = process_identity_for_pid(pid);
+        if !identity
+            .as_ref()
+            .map(|value| matches_service_identity(value, &expected_exe, &expected_app_dir))
+            .unwrap_or(false)
+        {
+            let detail = identity
+                .map(|value| value.command_line)
+                .unwrap_or_else(|| "<无法读取进程身份>".to_string());
             log::warn!(
-                "[python_manager] 端口 {PYTHON_PORT} 被 PID={pid} 占用，但不是本应用 Python 服务，跳过。cmd={cmdline}"
+                "[python_manager] 端口 {PYTHON_PORT} 被 PID={pid} 占用，但解释器或 app-dir 与本项目不符，跳过。cmd={detail}"
             );
             continue;
         }
@@ -235,10 +439,14 @@ pub fn start(state: &PythonProcess) -> Result<bool, String> {
     }
 
     if is_service_port_open() {
-        log::warn!(
-            "[python_manager] 端口 {PYTHON_PORT} 已有可用 Python 服务，复用当前后台"
-        );
-        return Ok(true);
+        if is_our_python_listener_on_port() {
+            log::warn!("[python_manager] 端口 {PYTHON_PORT} 已有本应用 Python 服务，复用当前后台");
+            return Ok(true);
+        }
+        log::error!("[python_manager] 端口 {PYTHON_PORT} 被非本应用进程占用，无法启动 Python 服务");
+        return Err(format!(
+            "端口 {PYTHON_PORT} 被其他程序占用，无法启动 Python 服务。请关闭占用 127.0.0.1:{PYTHON_PORT} 的程序后重试。"
+        ));
     }
 
     let python_exe = match find_python_exe() {
@@ -252,6 +460,11 @@ pub fn start(state: &PythonProcess) -> Result<bool, String> {
     let app_dir = match find_app_dir() {
         Some(d) => d,
         None => return Err("无法定位 python/ 目录".to_string()),
+    };
+
+    let user_tools_dir = {
+        let guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        guard.user_tools_dir.clone()
     };
 
     // L25 修复：app_dir 含非 UTF-8 字符时明确报错，不再静默回退到 "."（可能导致找错目录）
@@ -280,6 +493,10 @@ pub fn start(state: &PythonProcess) -> Result<bool, String> {
     // 服务鉴权令牌:传给 Python(app.py 中间件校验),前端经 service_token 命令取同一值。
     // 阻止本机其它程序/恶意网页直接打 localhost:18081 调工具、装工具。
     cmd.env("MULTIAGENT_SERVICE_TOKEN", service_token());
+    if let Some(dir) = user_tools_dir {
+        fs::create_dir_all(&dir).map_err(|e| format!("创建用户工具目录失败: {e}"))?;
+        cmd.env("MULTIAGENT_USER_TOOLS_DIR", dir);
+    }
 
     // 子进程 stdout/stderr 落盘到 logs/python.log（同一文件句柄克隆给两路）。
     // 打不开日志时回退到 Stdio::null，保持原有「丢弃输出」行为，不阻断服务。
@@ -310,7 +527,23 @@ pub fn start(state: &PythonProcess) -> Result<bool, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let child = cmd.spawn().map_err(|e| format!("Python 服务启动失败: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Python 服务启动失败: {e}"))?;
+    std::thread::sleep(Duration::from_millis(700));
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            log::error!("[python_manager] Python 服务启动后立即退出，状态={status}");
+            return Err(format!(
+                "Python 服务启动后立即退出，状态={status}。请查看 logs/python.log，或重新运行环境配置器重建 python\\venv。"
+            ));
+        }
+        Ok(None) => {}
+        Err(e) => {
+            log::error!("[python_manager] 检查 Python 服务启动状态失败: {e}");
+            return Err(format!("检查 Python 服务启动状态失败: {e}"));
+        }
+    }
     log::info!("[python_manager] Python 服务已启动，PID={}", child.id());
 
     // M5 修复：unwrap_or_else 处理 Mutex 中毒，即使中毒也能继续写入
@@ -357,7 +590,7 @@ pub fn python_status(state: tauri::State<'_, PythonProcess>) -> String {
     let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(child) = guard.child.as_mut() {
         match child.try_wait() {
-            Ok(None) => return "running".to_string(),   // 进程仍在运行
+            Ok(None) => return "running".to_string(), // 进程仍在运行
             Ok(Some(status)) => {
                 log::warn!("[python_manager] Python 进程已退出，状态={status}");
                 guard.child.take(); // 清除句柄
@@ -391,5 +624,86 @@ pub fn python_restart(state: tauri::State<'_, PythonProcess>) -> Result<String, 
         Ok(true) => Ok("running".to_string()),
         Ok(false) => Ok("stopped".to_string()),
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::*;
+
+    fn identity(executable: &str, app_dir: &str) -> ProcessIdentity {
+        ProcessIdentity {
+            executable_path: PathBuf::from(executable),
+            command_line: format!(
+                r#""{executable}" -m uvicorn app:app --host 127.0.0.1 --port 18081 --app-dir "{app_dir}" --log-level warning"#
+            ),
+        }
+    }
+
+    #[test]
+    fn service_identity_requires_exact_interpreter_and_project_app_dir() {
+        let executable = r"C:\project\python\venv\Scripts\python.exe";
+        let app_dir = r"C:\project\python";
+        assert!(matches_service_identity(
+            &identity(executable, app_dir),
+            Path::new(executable),
+            Path::new(app_dir),
+        ));
+
+        assert!(!matches_service_identity(
+            &identity(r"C:\other\python.exe", app_dir),
+            Path::new(executable),
+            Path::new(app_dir),
+        ));
+        assert!(!matches_service_identity(
+            &identity(executable, r"C:\other\python"),
+            Path::new(executable),
+            Path::new(app_dir),
+        ));
+    }
+
+    #[test]
+    fn generic_uvicorn_on_same_port_is_not_our_service() {
+        let executable = r"C:\project\python\venv\Scripts\python.exe";
+        let identity = ProcessIdentity {
+            executable_path: PathBuf::from(executable),
+            command_line: format!(
+                r#""{executable}" -m uvicorn app:app --port 18081 --app-dir "C:\unrelated""#
+            ),
+        };
+        assert!(!matches_service_identity(
+            &identity,
+            Path::new(executable),
+            Path::new(r"C:\project\python"),
+        ));
+    }
+
+    #[test]
+    fn service_identity_rejects_similar_or_disguised_module_commands() {
+        let executable = r"C:\project\python\venv\Scripts\python.exe";
+        let app_dir = r"C:\project\python";
+        for command_line in [
+            format!(r#""{executable}" -m uvicornx app:app --port 18081 --app-dir "{app_dir}""#),
+            format!(
+                r#""{executable}" -m uvicorn other:app --note app:app --port 18081 --app-dir "{app_dir}""#
+            ),
+        ] {
+            assert!(!matches_service_identity(
+                &ProcessIdentity {
+                    executable_path: PathBuf::from(executable),
+                    command_line,
+                },
+                Path::new(executable),
+                Path::new(app_dir),
+            ));
+        }
+    }
+
+    #[test]
+    fn model_host_validation_allows_explicit_local_and_rejects_private_ip() {
+        assert!(validate_model_host_inner("localhost", 11434, true).is_ok());
+        assert!(validate_model_host_inner("127.0.0.1", 8000, false).is_err());
+        assert!(validate_model_host_inner("192.168.1.10", 443, false).is_err());
+        assert!(validate_model_host_inner("8.8.8.8", 443, false).is_ok());
     }
 }

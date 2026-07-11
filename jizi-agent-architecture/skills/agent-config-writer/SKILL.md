@@ -1,37 +1,33 @@
 ---
-name: agent-config-writer
-description: Write practical Agent configurations for the multi-agent app. Use when the user asks for Agent names, descriptions, system prompts, tool tags, output formats, or model choices.
+index: "agent-config-writer"
+title: "Agent 配置编写"
+description: "当用户需要编写 Agent 名称、职责说明、系统提示词、工具标签、输出格式或模型选择建议时使用。"
+category: "workflow"
+capabilities: "编写 Agent 提示词 | 设计职责边界 | 建议工具标签 | 规划输出格式"
 ---
 
-# Agent Config Writer
+# Agent 配置编写
 
-Use this skill to create clear Agent definitions that users can paste into the app.
+## 具体能力
 
-## Workflow
+- 编写 Agent 提示词
+- 设计职责边界
+- 建议工具标签
+- 规划输出格式
 
-1. Clarify the Agent's single responsibility.
-2. Choose a concise name.
-3. Write a one-sentence description.
-4. Write a system prompt that defines input, task, output, and boundaries.
-5. Suggest tool tags only when the Agent truly needs them.
-6. Suggest output format: markdown, docx, xlsx, or mindmap.
-7. Suggest model capability needs: long context, vision, reasoning, or ordinary text.
+## 做事方法
 
-## Prompt Rules
+先确认 Agent 的单一职责，再给出简洁名称、一句话描述、系统提示词、工具标签、输出格式和模型能力建议。提示词必须写清输入、任务、边界、缺失信息处理方式和输出结构。
 
-- Keep prompts task-focused, not theatrical.
-- Include what to do when input is missing.
-- Include output structure when the downstream node expects structure.
-- Do not invent app field names. Use placeholders if unsure.
+工具标签只在任务确实需要工具时建议；不要为了完整而添加无关工具。输出格式根据下游消费方式选择：普通说明用 Markdown，正式文档用 docx，结构化数据用 xlsx，层级结构用 mindmap。
 
-## Output Template
+提示词要任务化、可执行、少表演性措辞。不要编造应用不存在的字段；不确定字段名时用占位说明。需要结构化输出时，明确标题、字段、列表或表格格式。
 
-```text
-名称: ...
-描述: ...
-工具标签: ...
-输出格式: ...
-模型需求: ...
-系统提示词:
-...
-```
+输出模板：
+
+- 名称：
+- 描述：
+- 工具标签：
+- 输出格式：
+- 模型需求：
+- 系统提示词：

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # 必须同步升本版本号 + 前端 app/src/lib/pythonClient.ts 的 EXPECTED_PYTHON_SERVICE_VERSION,
 # 二者必须完全一致。否则 ensureCompatiblePythonService 无法识别旧后台、不触发强制重启,
 # 用户会跑着旧代码却以为功能坏了(如 Token 统计恒 0)。
-LLM_CALLING_VERSION = "2026-07-09.tool-metadata-tags"
+LLM_CALLING_VERSION = "2026-07-11.custom-model-endpoints"
 TIMEOUT = 300  # 秒
 CONNECT_TIMEOUT = 15
 MAX_RETRIES = 2
@@ -62,53 +62,50 @@ MAX_TOKENS_LIMIT = 16_384
 MAX_MESSAGES = 200
 
 
-def _is_private_ip(ip_str: str) -> bool:
-    """返回 True 表示该 IP 是私有/回环/链路本地地址。"""
+def _is_non_public_ip(ip_str: str) -> bool:
+    """返回 True 表示该 IP 不是可安全访问的公网单播地址。"""
     try:
-        addr = ipaddress.ip_address(ip_str)
-        return (
-            addr.is_private
-            or addr.is_loopback
-            or addr.is_link_local
-            or addr.is_multicast
-        )
+        return not ipaddress.ip_address(ip_str).is_global
     except ValueError:
-        return False
+        return True
 
 
 def _validate_base_url(base_url: str) -> str:
-    """H2 SSRF 防护：只允许明确列入白名单的 LLM 服务域名。"""
+    """允许预设或用户明确配置的公网 HTTPS，以及显式 localhost 本地服务。"""
     parsed = urlparse(base_url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"base_url 协议不支持: {parsed.scheme}（仅允许 http/https）")
+    if parsed.username or parsed.password:
+        raise ValueError("base_url 不能包含用户名或密码")
+    if parsed.query or parsed.fragment:
+        raise ValueError("base_url 不能包含查询参数或片段")
 
-    hostname = parsed.hostname or ""
+    hostname = (parsed.hostname or "").lower()
     if not hostname:
         raise ValueError("base_url 缺少主机名")
+    local_hosts = {"localhost", "127.0.0.1"}
+    is_local = hostname in local_hosts
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and is_local):
+        raise ValueError("自定义模型仅允许公网 HTTPS 地址；HTTP 只允许 localhost 本地服务")
 
-    # 白名单直接放行
-    if hostname in _ALLOWED_DOMAINS:
+    if is_local:
         return base_url.rstrip("/")
 
-    # 非白名单仍解析一次，给用户更清晰的错误提示，并保留私有地址专项提示。
     try:
-        ip = socket.gethostbyname(hostname)
-    except socket.gaierror:
-        # DNS 解析失败：拒绝（未知主机）
-        raise ValueError(
-            f"base_url 主机名 '{hostname}' 不在允许列表中且无法解析。\n"
-            "如需使用自定义端点，请在 llm_calling.py 的 _ALLOWED_DOMAINS 中添加该域名。"
-        )
+        port = parsed.port or 443
+        addresses = {
+            item[4][0]
+            for item in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        }
+    except (socket.gaierror, ValueError) as exc:
+        raise ValueError(f"base_url 主机名 '{hostname}' 无法解析") from exc
 
-    if _is_private_ip(ip):
+    if not addresses:
+        raise ValueError(f"base_url 主机名 '{hostname}' 没有可用 IP")
+    blocked = next((ip for ip in addresses if _is_non_public_ip(ip)), None)
+    if blocked:
         raise ValueError(
-            f"拒绝访问私有/回环地址 '{hostname}' ({ip})，防止 SSRF 攻击。"
+            f"拒绝访问私网、回环、链路本地或保留地址 '{hostname}' ({blocked})，防止 SSRF 攻击。"
         )
-
-    raise ValueError(
-        f"base_url 主机名 '{hostname}' 不在允许列表中，已拒绝代理请求以保护 API Key。"
-        "如需使用自定义端点，请先将可信域名加入 llm_calling.py 的 _ALLOWED_DOMAINS。"
-    )
+    return base_url.rstrip("/")
 
 
 def _is_transient_error(exc: BaseException) -> bool:
@@ -146,7 +143,10 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> di
                 },
                 json=payload,
                 timeout=(CONNECT_TIMEOUT, TIMEOUT),
+                allow_redirects=False,
             )
+            if 300 <= resp.status_code < 400:
+                raise RuntimeError("LLM 服务返回重定向，已拒绝跟随以防止凭据泄露")
             resp.raise_for_status()
             try:
                 return resp.json()

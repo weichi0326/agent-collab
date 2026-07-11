@@ -8,6 +8,31 @@ import { createJSONStorage, type StateStorage } from 'zustand/middleware';
 // isTauri() 在模块加载时求值一次即可(运行环境不会中途改变)。
 const inTauri = isTauri();
 
+export const PROJECT_STORAGE_KEYS = [
+  'multi-agent-canvas',
+  'multi-agent-agents',
+  'multi-agent-models',
+  'multi-agent-search',
+  'multi-agent-master',
+  'multi-agent-ui',
+  'multi-agent-tools',
+  'multi-agent-token-stats',
+  'multi-agent-orchestrator',
+  'multi-agent-jizi-skills',
+] as const;
+
+export async function clearProjectStorageData(): Promise<void> {
+  if (inTauri) {
+    await Promise.all(
+      PROJECT_STORAGE_KEYS.map((key) => invoke('storage_remove', { key })),
+    );
+    return;
+  }
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith('multi-agent-'))
+    .forEach((key) => localStorage.removeItem(key));
+}
+
 const projectStorage: StateStorage = {
   getItem: async (name) => {
     if (!inTauri) return localStorage.getItem(name);

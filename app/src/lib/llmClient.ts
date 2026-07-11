@@ -7,6 +7,7 @@ import type { ProviderApi } from './providers';
 import { createTimeoutSignal } from './abortUtils'; // M1：消除重复超时信号逻辑
 import { ensureCompatiblePythonService, executeTool, unwrapToolResult } from './pythonClient';
 import { useTokenStatsStore, type JiziScene } from '../stores/tokenStatsStore';
+import { validateModelBaseUrl } from './modelEndpoint';
 
 const httpFetch: typeof fetch = isTauri() ? (tauriFetch as typeof fetch) : fetch;
 
@@ -48,13 +49,14 @@ async function withTimeout(url: string, init: RequestInit): Promise<Response> {
 
 // 获取模型列表
 export async function listModels(cfg: LLMConfig): Promise<string[]> {
-  const base = trimBase(cfg.baseURL);
+  const base = trimBase(await validateModelBaseUrl(cfg.baseURL));
   if (!base) throw new Error('缺少 baseURL');
   if (!cfg.apiKey) throw new Error('缺少密钥');
 
   const url = `${base}/models`;
   const res = await withTimeout(url, {
     method: 'GET',
+    redirect: 'error',
     headers: authHeaders(cfg),
   });
   if (!res.ok) {
@@ -138,7 +140,7 @@ const MAX_TOKENS = 4096; // anthropic 必填,openai/gemini 忽略
 // 图片走各协议的多模态 content 块。取消由外部 signal 驱动。
 export async function chat(params: ChatParams): Promise<string> {
   const { cfg, model, system, text, images = [], history = [], signal, scene } = params;
-  const base = trimBase(cfg.baseURL);
+  const base = trimBase(await validateModelBaseUrl(cfg.baseURL));
   if (!base) throw new Error('缺少 baseURL');
   if (!cfg.apiKey) throw new Error('缺少密钥');
   if (!model) throw new Error('缺少模型');
@@ -153,6 +155,7 @@ export async function chat(params: ChatParams): Promise<string> {
       content.push({ type: 'text', text });
       const res = await httpFetch(`${base}/messages`, {
         method: 'POST',
+        redirect: 'error',
         headers: {
           ...authHeaders(cfg),
           'content-type': 'application/json',
@@ -214,6 +217,7 @@ export async function chat(params: ChatParams): Promise<string> {
     messages.push({ role: 'user', content: userContent });
     const res = await httpFetch(`${base}/chat/completions`, {
       method: 'POST',
+      redirect: 'error',
       headers: { ...authHeaders(cfg), 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages }),
       signal: reqSignal,

@@ -14,6 +14,7 @@ import {
   type ProviderConfig,
 } from '../stores/modelStore';
 import { ModelList } from './ModelConfigModal/ModelList';
+import { validateModelBaseUrl } from '../lib/modelEndpoint';
 
 function toLLMConfig(config: ProviderConfig): LLMConfig {
   const preset = getProvider(config.providerId);
@@ -56,6 +57,7 @@ function ModelConfigModal({
   const [fetchingId, setFetchingId] = useState<string | null>(null);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
   // M2 修复：mounted ref 防止弹窗关闭后 setTest/setFetchingId 写入已卸载组件
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -134,7 +136,7 @@ function ModelConfigModal({
     setNewModel('');
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     if (!formActive) {
       message.warning('请先在左侧选择厂商');
       return;
@@ -151,23 +153,32 @@ function ModelConfigModal({
       message.warning('请填写密钥');
       return;
     }
-    if (selectedConfigId) {
-      updateProvider(selectedConfigId, {
-        name: name.trim(),
-        baseURL: baseURL.trim(),
-        apiKey: apiKey.trim(),
-      });
-      message.success('配置已更新');
-    } else {
-      const id = addProvider(
-        draftProviderId!,
-        name.trim(),
-        apiKey.trim(),
-        baseURL.trim(),
-      );
-      setSelectedConfigId(id);
-      setDraftProviderId(undefined);
-      message.success(`已保存「${name.trim()}」配置`);
+    setSavingConfig(true);
+    try {
+      const normalizedBaseURL = await validateModelBaseUrl(baseURL);
+      setBaseURL(normalizedBaseURL);
+      if (selectedConfigId) {
+        updateProvider(selectedConfigId, {
+          name: name.trim(),
+          baseURL: normalizedBaseURL,
+          apiKey: apiKey.trim(),
+        });
+        message.success('配置已更新');
+      } else {
+        const id = addProvider(
+          draftProviderId!,
+          name.trim(),
+          apiKey.trim(),
+          normalizedBaseURL,
+        );
+        setSelectedConfigId(id);
+        setDraftProviderId(undefined);
+        message.success(`已保存「${name.trim()}」配置`);
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '请求接口 URL 校验失败');
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -370,7 +381,7 @@ function ModelConfigModal({
                   自定义 / 中转商需手动填写 url 与密钥(OpenAI 兼容协议)
                 </div>
               )}
-              <Button type="primary" block onClick={onSave}>
+              <Button type="primary" block loading={savingConfig} onClick={() => void onSave()}>
                 {selectedConfigId ? '更新配置' : '保存配置'}
               </Button>
             </div>

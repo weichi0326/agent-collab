@@ -7,7 +7,11 @@ import {
   ImportOutlined,
   PartitionOutlined,
 } from '@ant-design/icons';
-import { useCanvasStore, validateCanvasName } from '../../stores/canvasStore';
+import {
+  canvasLimitMessage,
+  useCanvasStore,
+  validateCanvasName,
+} from '../../stores/canvasStore';
 import { useToolStore } from '../../stores/toolStore';
 import { mergeToolTags } from '../../lib/toolRegistry';
 import { fileToText } from '../../lib/textFile';
@@ -49,12 +53,9 @@ export function SavedCanvases() {
   };
 
   const onOpen = (id: string) => {
-    const already = canvases.some((c) => c.savedId === id);
-    if (!already && canvases.length >= maxCanvases) {
-      message.warning(`已打开 ${maxCanvases} 个画布,请先关闭再打开`);
-      return;
-    }
-    openSaved(id);
+    const result = openSaved(id);
+    if (result === 'limit') message.warning(canvasLimitMessage(maxCanvases));
+    else if (result === 'not-found') message.warning('该已保存画布不存在或已被删除');
   };
 
   const onDelete = (id: string, name: string) => {
@@ -94,7 +95,7 @@ export function SavedCanvases() {
         parseCanvasImport(text, knownTags);
       const ok = importCanvas(name, nodes, edges);
       if (!ok) {
-        message.warning(`已打开 ${maxCanvases} 个画布,请先关闭再导入`);
+        message.warning(canvasLimitMessage(maxCanvases));
         return;
       }
       message.success(`已导入画布「${name}」(${nodes.length} 个节点)`);

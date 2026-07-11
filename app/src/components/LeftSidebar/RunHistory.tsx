@@ -4,7 +4,7 @@ import {
   DeleteOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
-import { useCanvasStore } from '../../stores/canvasStore';
+import { canvasLimitMessage, useCanvasStore } from '../../stores/canvasStore';
 import { RUN_HISTORY_STATUS } from './constants';
 
 export function RunHistory() {
@@ -23,12 +23,10 @@ export function RunHistory() {
         message.info('该运行记录较早,仅保留摘要信息,不可回看快照');
         return;
       }
-      if (s.canvases.length >= s.maxCanvases) {
-        message.warning(`最多只能同时打开 ${s.maxCanvases} 个画布,请先关闭一个`);
-        return;
-      }
     }
-    openRun(runId);
+    const result = openRun(runId);
+    if (result === 'limit') message.warning(canvasLimitMessage(s.maxCanvases));
+    else if (result === 'not-found') message.warning('该运行记录不存在或无法回看');
   };
 
   const onDelete = (runId: string) => {
