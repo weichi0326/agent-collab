@@ -16,12 +16,14 @@ interface UiState {
   // 收起时点通知「去确认」跳回消息页)。二者是瞬态,不持久化(见下方 partialize),
   // 保持刷新后默认收起 / 停留工作区的原行为。
   drawerExpanded: boolean;
+  drawerFullscreen: boolean;
   view: AppView;
 
   setLeftWidth: (w: number) => void;
   setRightWidth: (w: number) => void;
   setMasterModel: (m: MasterModel | null) => void;
   setDrawerExpanded: (v: boolean | ((prev: boolean) => boolean)) => void;
+  setDrawerFullscreen: (value: boolean) => void;
   setView: (v: AppView) => void;
 }
 
@@ -34,6 +36,15 @@ function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max);
 }
 
+export function partializeUiState(state: UiState) {
+  return {
+    leftWidth: state.leftWidth,
+    rightWidth: state.rightWidth,
+    masterModel: state.masterModel,
+    drawerFullscreen: state.drawerFullscreen,
+  };
+}
+
 export const useUiStore = create<UiState>()(
   persist(
     (set) => ({
@@ -41,6 +52,7 @@ export const useUiStore = create<UiState>()(
       rightWidth: 340,
       masterModel: null,
       drawerExpanded: false,
+      drawerFullscreen: false,
       view: 'workspace',
 
       setLeftWidth: (w) => set({ leftWidth: clamp(w, LEFT_MIN, LEFT_MAX) }),
@@ -51,18 +63,15 @@ export const useUiStore = create<UiState>()(
           drawerExpanded:
             typeof v === 'function' ? v(s.drawerExpanded) : v,
         })),
+      setDrawerFullscreen: (drawerFullscreen) => set({ drawerFullscreen }),
       setView: (v) => set({ view: v }),
     }),
     {
       name: 'multi-agent-ui',
       storage: createProjectStorage(),
       version: 1,
-      // drawerExpanded / view 为瞬态,不入盘(避免刷新后自动展开抽屉或停在报表页)。
-      partialize: (s) => ({
-        leftWidth: s.leftWidth,
-        rightWidth: s.rightWidth,
-        masterModel: s.masterModel,
-      }),
+      // 展开状态与主视图为瞬态；半屏/全屏是用户显示偏好，需要持久化。
+      partialize: partializeUiState,
     },
   ),
 );
