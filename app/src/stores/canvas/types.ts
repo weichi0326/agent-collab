@@ -44,6 +44,10 @@ export interface AgentNodeData {
   agentId?: string;
   description?: string;
   systemPrompt?: string;
+  systemPromptSourceName?: string;
+  outputRuleEnabled?: boolean;
+  outputRuleText?: string;
+  outputRuleSourceName?: string;
   toolTags?: string[];
   modelRef?: { configId: string; modelId: string } | null;
   inputSchemaText?: string;

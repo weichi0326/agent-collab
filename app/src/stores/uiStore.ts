@@ -2,11 +2,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createProjectStorage } from '../lib/tauriStorage';
 import type { ModelRef } from '../lib/modelRef';
+import type { SettingsSection } from '../settings/settingsCatalog';
 
 // 总 Agent 选用的对话模型(指向 modelStore 中某条已启用模型)
 export type MasterModel = ModelRef;
 
-export type AppView = 'workspace' | 'reports';
+export type AppView = 'workspace' | 'reports' | 'settings';
 
 interface UiState {
   leftWidth: number;
@@ -18,6 +19,8 @@ interface UiState {
   drawerExpanded: boolean;
   drawerFullscreen: boolean;
   view: AppView;
+  settingsSection: SettingsSection;
+  settingsDirty: boolean;
 
   setLeftWidth: (w: number) => void;
   setRightWidth: (w: number) => void;
@@ -25,6 +28,8 @@ interface UiState {
   setDrawerExpanded: (v: boolean | ((prev: boolean) => boolean)) => void;
   setDrawerFullscreen: (value: boolean) => void;
   setView: (v: AppView) => void;
+  setSettingsSection: (section: SettingsSection) => void;
+  setSettingsDirty: (dirty: boolean) => void;
 }
 
 export const LEFT_MIN = 220;
@@ -54,6 +59,8 @@ export const useUiStore = create<UiState>()(
       drawerExpanded: false,
       drawerFullscreen: false,
       view: 'workspace',
+      settingsSection: 'models',
+      settingsDirty: false,
 
       setLeftWidth: (w) => set({ leftWidth: clamp(w, LEFT_MIN, LEFT_MAX) }),
       setRightWidth: (w) => set({ rightWidth: clamp(w, RIGHT_MIN, RIGHT_MAX) }),
@@ -65,6 +72,8 @@ export const useUiStore = create<UiState>()(
         })),
       setDrawerFullscreen: (drawerFullscreen) => set({ drawerFullscreen }),
       setView: (v) => set({ view: v }),
+      setSettingsSection: (settingsSection) => set({ settingsSection }),
+      setSettingsDirty: (settingsDirty) => set({ settingsDirty }),
     }),
     {
       name: 'multi-agent-ui',

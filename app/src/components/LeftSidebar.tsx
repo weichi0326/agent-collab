@@ -15,7 +15,7 @@ function LeftSidebar() {
   return (
     <div className="agent-sidebar" style={{ width: leftWidth }}>
       <ResizeHandle side="left" />
-      <div style={{ padding: 12, borderBottom: '1px solid #f0f1f3' }}>
+      <div className="workspace-panel-header">
         <Segmented
           block
           value={tab}

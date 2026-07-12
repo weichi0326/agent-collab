@@ -208,6 +208,8 @@ function CommandPalette() {
 
   return (
     <Modal
+      className="pearl-dialog pearl-command-palette-dialog"
+      rootClassName="pearl-dialog-root"
       open={open}
       onCancel={close}
       footer={null}
@@ -216,7 +218,7 @@ function CommandPalette() {
       styles={{ body: { padding: 0 } }}
       afterOpenChange={(o) => o && inputRef.current?.focus()}
     >
-      <div className="command-palette">
+      <div className="command-palette pearl-command-palette">
         <Input
           ref={inputRef}
           size="large"

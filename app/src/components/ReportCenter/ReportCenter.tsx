@@ -310,7 +310,8 @@ export default function ReportCenter({ refreshToken }: ReportCenterProps) {
       title: '原因',
       dataIndex: 'reason',
       ellipsis: true,
-      render: (reason: string) => reason || <span style={{ color: '#999' }}>—</span>,
+      render: (reason: string) =>
+        reason || <span className="report-center__muted">—</span>,
     },
     {
       title: '代码指纹',

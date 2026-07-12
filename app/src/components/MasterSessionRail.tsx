@@ -4,7 +4,6 @@ import {
   PlusOutlined,
   MessageOutlined,
   DeleteOutlined,
-  SettingOutlined,
   LoadingOutlined,
   MedicineBoxOutlined,
 } from '@ant-design/icons';
@@ -13,12 +12,8 @@ import {
   DIAGNOSIS_SESSION_ID,
 } from '../stores/masterAgentStore';
 
-interface Props {
-  onOpenConfig: () => void;
-}
-
 // 左侧会话栏:新建 / 切换 / 重命名(双击标题)/ 删除。删除即从 store 移除并落盘,永久销毁。
-function MasterSessionRail({ onOpenConfig }: Props) {
+function MasterSessionRail() {
   const { modal } = App.useApp();
   const sessions = useMasterAgentStore((s) => s.sessions);
   const activeId = useMasterAgentStore((s) => s.activeId);
@@ -71,15 +66,6 @@ function MasterSessionRail({ onOpenConfig }: Props) {
         >
           <PlusOutlined /> 新建会话
         </button>
-        <Tooltip title="姬子配置">
-          <button
-            type="button"
-            className="session-rail__config"
-            onClick={onOpenConfig}
-          >
-            <SettingOutlined />
-          </button>
-        </Tooltip>
       </div>
 
       <div className="session-rail__list">

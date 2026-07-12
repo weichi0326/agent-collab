@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Input, Select, Radio, Button, App, Segmented, InputNumber } from 'antd';
+import {
+  Input,
+  Select,
+  Radio,
+  Button,
+  App,
+  Segmented,
+  InputNumber,
+  Switch,
+} from 'antd';
 import { isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   FileTextOutlined,
   CloseOutlined,
+  DownOutlined,
   FolderOpenOutlined,
   InboxOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { useUiStore } from '../stores/uiStore';
 import {
@@ -33,9 +44,16 @@ import { formatTimerLabel } from '../lib/timerLabel';
 import { NodeRunStatus } from './PropertiesPanel/NodeRunStatus';
 import { OutputItems } from './PropertiesPanel/OutputItems';
 import { useSelectedNodeContext } from './PropertiesPanel/useSelectedNodeContext';
+import {
+  NODE_PROMPT_CHAR_CAP,
+  nodePromptSourceLabel,
+  normalizeNodePromptText,
+} from './PropertiesPanel/nodePromptImport';
+import { TEXT_EXTENSIONS, fileToText, isTextFile } from '../lib/textFile';
 
 // 桌面端(Tauri)走系统原生选择器/打开;纯浏览器回落 <input type=file> 与提示。
 const inTauri = isTauri();
+const NODE_PROMPT_ACCEPT = TEXT_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
 // 属性编辑的撤销合并:同一节点同一字段在 EDIT_COALESCE_MS 内的连续输入合并为一次快照,
 // 避免逐字符入 history 导致撤销要按无数次;切换字段/节点或超时则开启新会话。
@@ -66,6 +84,8 @@ function PropertiesPanel() {
   const [missingPaths, setMissingPaths] = useState<Set<string>>(
     () => new Set(),
   );
+  const [promptPreviewOpen, setPromptPreviewOpen] = useState(false);
+  const [outputRulePreviewOpen, setOutputRulePreviewOpen] = useState(false);
 
   const agentId =
     typeof node?.data?.agentId === 'string' ? node.data.agentId : undefined;
@@ -84,8 +104,28 @@ function PropertiesPanel() {
   const hasUpstream = ups.length > 0;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const promptFileInputRef = useRef<HTMLInputElement>(null);
+  const outputRuleFileInputRef = useRef<HTMLInputElement>(null);
 
   const d = (node?.data ?? {}) as AgentNodeData;
+  const promptText = typeof d.systemPrompt === 'string' ? d.systemPrompt : '';
+  const promptSourceName =
+    typeof d.systemPromptSourceName === 'string'
+      ? d.systemPromptSourceName
+      : undefined;
+  const promptSourceLabel = nodePromptSourceLabel(
+    promptText,
+    promptSourceName,
+  );
+  const outputRuleEnabled = d.outputRuleEnabled === true;
+  const outputRuleText =
+    typeof d.outputRuleText === 'string' ? d.outputRuleText : '';
+  const outputRuleSourceName =
+    typeof d.outputRuleSourceName === 'string'
+      ? d.outputRuleSourceName
+      : undefined;
+  const outputRuleSourceLabel =
+    outputRuleSourceName ?? (outputRuleText ? '已导入规则' : '未导入');
   const modelValue = packModelRef(d.modelRef ?? null);
   const modelValid = isValidModelRef(modelValue, modelOptions);
 
@@ -148,6 +188,11 @@ function PropertiesPanel() {
     };
   }, [canvas?.id, canvas?.readOnly, canvas?.runId, node, outputCheckKey]);
 
+  useEffect(() => {
+    setPromptPreviewOpen(false);
+    setOutputRulePreviewOpen(false);
+  }, [node?.id]);
+
   const patch = (p: Partial<AgentNodeData>) => {
     if (!node) return;
     const field = Object.keys(p).sort().join(',');
@@ -165,6 +210,44 @@ function PropertiesPanel() {
 
   const onChangeModel = (val: string | undefined) => {
     patch({ modelRef: unpackModelRef(val) });
+  };
+
+  const onPickPromptFile = async (file: File) => {
+    if (!isTextFile(file)) {
+      message.warning('请选择纯文本格式的文件(txt/md/csv/json/log/xml/yaml/yml)');
+      return;
+    }
+    try {
+      const normalized = normalizeNodePromptText(await fileToText(file));
+      patch({
+        systemPrompt: normalized.text,
+        systemPromptSourceName: file.name,
+      });
+      if (normalized.truncated) {
+        message.warning(`文件内容过长,已截断至 ${NODE_PROMPT_CHAR_CAP} 字`);
+      }
+    } catch {
+      message.error('读取文件失败');
+    }
+  };
+
+  const onPickOutputRuleFile = async (file: File) => {
+    if (!isTextFile(file)) {
+      message.warning('请选择纯文本格式的文件(txt/md/csv/json/log/xml/yaml/yml)');
+      return;
+    }
+    try {
+      const normalized = normalizeNodePromptText(await fileToText(file));
+      patch({
+        outputRuleText: normalized.text,
+        outputRuleSourceName: file.name,
+      });
+      if (normalized.truncated) {
+        message.warning(`文件内容过长,已截断至 ${NODE_PROMPT_CHAR_CAP} 字`);
+      }
+    } catch {
+      message.error('读取文件失败');
+    }
   };
 
   // 合并去重写入(桌面端存真实绝对路径,浏览器存文件名)
@@ -259,7 +342,7 @@ function PropertiesPanel() {
     return (
       <div className="right-panel" style={{ width: rightWidth }}>
         <ResizeHandle side="right" />
-        <div style={{ padding: 12, borderBottom: '1px solid #f0f1f3' }}>
+        <div className="workspace-panel-header">
           <Segmented
             block
             className="single-seg"
@@ -322,7 +405,7 @@ function PropertiesPanel() {
     return (
       <div className="right-panel" style={{ width: rightWidth }}>
         <ResizeHandle side="right" />
-        <div style={{ padding: 12, borderBottom: '1px solid #f0f1f3' }}>
+        <div className="workspace-panel-header">
           <Segmented
             block
             className="single-seg"
@@ -396,7 +479,7 @@ function PropertiesPanel() {
   return (
     <div className="right-panel" style={{ width: rightWidth }}>
       <ResizeHandle side="right" />
-      <div style={{ padding: 12, borderBottom: '1px solid #f0f1f3' }}>
+      <div className="workspace-panel-header">
         <Segmented
           block
           className="single-seg"
@@ -443,13 +526,55 @@ function PropertiesPanel() {
 
             <div className="agent-form__field">
               <div className="agent-form__label">系统提示词</div>
-              <Input.TextArea
-                value={typeof d.systemPrompt === 'string' ? d.systemPrompt : ''}
-                autoSize={{ minRows: 5, maxRows: 10 }}
-                placeholder="定义该节点的角色、任务与输出要求"
+              <input
+                ref={promptFileInputRef}
+                type="file"
+                accept={NODE_PROMPT_ACCEPT}
+                style={{ display: 'none' }}
                 disabled={readOnly}
-                onChange={(e) => patch({ systemPrompt: e.target.value })}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void onPickPromptFile(file);
+                  event.target.value = '';
+                }}
               />
+              <div className="node-prompt-import__controls">
+                <Button
+                  size="small"
+                  icon={<InboxOutlined />}
+                  disabled={readOnly}
+                  onClick={() => promptFileInputRef.current?.click()}
+                >
+                  选择文件导入
+                </Button>
+                <span title={promptSourceLabel}>
+                  {promptText ? `已导入 · ${promptSourceLabel}` : '未导入'}
+                </span>
+              </div>
+              <div className="master-config-preview node-prompt-import__preview">
+                <button
+                  type="button"
+                  className="master-config-preview__toggle"
+                  aria-expanded={promptPreviewOpen}
+                  aria-label={
+                    promptPreviewOpen
+                      ? '收起系统提示词预览'
+                      : '展开系统提示词预览'
+                  }
+                  onClick={() => setPromptPreviewOpen((open) => !open)}
+                >
+                  {promptPreviewOpen ? <DownOutlined /> : <RightOutlined />}
+                  <span>系统提示词预览</span>
+                  <em>{promptText.length.toLocaleString('en-US')} 字符</em>
+                </button>
+                {promptPreviewOpen && (
+                  <Input.TextArea
+                    value={promptText}
+                    disabled
+                    autoSize={{ minRows: 6, maxRows: 14 }}
+                  />
+                )}
+              </div>
             </div>
 
             <div className="agent-form__field">
@@ -488,7 +613,7 @@ function PropertiesPanel() {
               <div className="agent-form__label">数据来源</div>
               {hasUpstream ? (
                 <div className="node-source node-source--upstream">
-                  <div className="node-source__hint">来自前序节点(不可修改)：</div>
+                  <div className="node-source__hint">来自前序节点：</div>
                   <div className="node-source__ups">
                     {ups.map((n, i) => (
                       <span key={i} className="node-source__up-chip">
@@ -634,16 +759,91 @@ function PropertiesPanel() {
             </div>
 
             {/* 输出目录 */}
-            <div className="agent-form__field">
-              <div className="agent-form__label">输出格式</div>
-              <Select
+             <div className="agent-form__field">
+               <div className="agent-form__label">输出格式</div>
+               <Select
                 style={{ width: '100%' }}
                 value={outputFormat}
                 disabled={readOnly}
                 options={OUTPUT_FORMAT_OPTIONS}
-                onChange={(value) => patch({ outputFormat: value })}
-              />
-            </div>
+                 onChange={(value) => patch({ outputFormat: value })}
+               />
+               <div className="node-output-rule__switch-row">
+                 <span>自定义输出规则</span>
+                 <Switch
+                   size="small"
+                   checked={outputRuleEnabled}
+                   disabled={readOnly}
+                   onChange={(checked) => {
+                     patch({ outputRuleEnabled: checked });
+                     if (!checked) setOutputRulePreviewOpen(false);
+                   }}
+                 />
+               </div>
+               {outputRuleEnabled && (
+                 <div className="node-output-rule">
+                   <input
+                     ref={outputRuleFileInputRef}
+                     type="file"
+                     accept={NODE_PROMPT_ACCEPT}
+                     style={{ display: 'none' }}
+                     disabled={readOnly}
+                     onChange={(event) => {
+                       const file = event.target.files?.[0];
+                       if (file) void onPickOutputRuleFile(file);
+                       event.target.value = '';
+                     }}
+                   />
+                   <div className="node-prompt-import__controls node-output-rule__controls">
+                     <Button
+                       size="small"
+                       icon={<InboxOutlined />}
+                       disabled={readOnly}
+                       onClick={() => outputRuleFileInputRef.current?.click()}
+                     >
+                       选择文件导入
+                     </Button>
+                     <span title={outputRuleSourceLabel}>
+                       {outputRuleText
+                         ? `已导入 · ${outputRuleSourceLabel}`
+                         : '未导入'}
+                     </span>
+                   </div>
+                   <div className="master-config-preview node-prompt-import__preview node-output-rule__preview">
+                     <button
+                       type="button"
+                       className="master-config-preview__toggle"
+                       aria-expanded={outputRulePreviewOpen}
+                       aria-label={
+                         outputRulePreviewOpen
+                           ? '收起输出规则预览'
+                           : '展开输出规则预览'
+                       }
+                       onClick={() =>
+                         setOutputRulePreviewOpen((open) => !open)
+                       }
+                     >
+                       {outputRulePreviewOpen ? (
+                         <DownOutlined />
+                       ) : (
+                         <RightOutlined />
+                       )}
+                       <span>输出规则预览</span>
+                       <em>
+                         {outputRuleText.length.toLocaleString('en-US')} 字符
+                       </em>
+                     </button>
+                     {outputRulePreviewOpen && (
+                       <Input.TextArea
+                         value={outputRuleText}
+                         disabled
+                         autoSize={{ minRows: 6, maxRows: 14 }}
+                       />
+                     )}
+                   </div>
+                 </div>
+               )}
+             </div>
 
             <div className="agent-form__field">
               <div className="agent-form__label">输出目录</div>

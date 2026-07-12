@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { type NodeProps } from '@xyflow/react';
 import {
   RobotOutlined,
   DownOutlined,
@@ -16,6 +16,7 @@ import {
   type AgentRunState,
   type AgentRunStatus,
 } from '../stores/canvasStore';
+import { NodeRoutingHandles } from './CanvasArea/NodeRoutingHandles';
 
 const RUN_STATUS_TEXT = {
   idle: '未运行',
@@ -115,11 +116,7 @@ function AgentNode({ id, data, selected }: NodeProps<AgentNodeType>) {
         selected ? ' agent-node--selected' : ''
       }`}
     >
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="agent-node__handle"
-      />
+      <NodeRoutingHandles />
       <div className="agent-node__main">
         {d?.collapsible && (
           <button
@@ -143,11 +140,6 @@ function AgentNode({ id, data, selected }: NodeProps<AgentNodeType>) {
       {showElapsed && (
         <div className="agent-node__elapsed">已运行：{elapsedText}</div>
       )}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="agent-node__handle"
-      />
     </div>
   );
 }

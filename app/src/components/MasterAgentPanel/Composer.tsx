@@ -175,7 +175,7 @@ export function Composer({
           </button>
           <Tooltip
             title={
-              searchReady ? '' : '请先在标题栏「搜索配置」中启用并填写密钥'
+              searchReady ? '' : '请先在设置 > 联网搜索中启用并填写密钥'
             }
           >
             <button

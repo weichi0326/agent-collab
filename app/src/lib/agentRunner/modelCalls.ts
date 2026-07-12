@@ -41,6 +41,10 @@ export function buildPrompt(node: Node, input: string): string {
   const data = node.data as AgentNodeData;
   const format = outputFormatForNode(node);
   const outputSchemaText = schemaTextFromNode(node, 'outputSchemaText');
+  const outputRuleText =
+    data.outputRuleEnabled && typeof data.outputRuleText === 'string'
+      ? data.outputRuleText.trim()
+      : '';
   const outputInstruction =
     format === 'markdown'
       ? '请根据输入完成该节点任务，并输出可直接保存为 Markdown 的结果。'
@@ -53,6 +57,9 @@ export function buildPrompt(node: Node, input: string): string {
     `你正在执行 Agent 节点「${nodeLabel(node)}」。`,
     data.description ? `节点职责：${data.description}` : '',
     outputInstruction,
+    outputRuleText
+      ? `自定义输出规则（仅约束所选文件格式内部的内容与结构，不得改变文件类型）：\n${outputRuleText}`
+      : '',
     outputSchemaText
       ? `输出还必须匹配以下 JSON Schema。请优先返回可直接解析的 JSON：\n${outputSchemaText}`
       : '',

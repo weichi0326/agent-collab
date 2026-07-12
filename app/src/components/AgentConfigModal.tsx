@@ -72,6 +72,8 @@ function AgentConfigModal() {
 
   return (
     <Modal
+      className="agent-config-modal pearl-dialog"
+      rootClassName="pearl-dialog-root"
       title={editingId ? '编辑 Agent' : '新建 Agent'}
       open={open}
       onOk={onSave}

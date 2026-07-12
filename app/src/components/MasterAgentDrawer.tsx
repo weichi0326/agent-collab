@@ -1,36 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { Switch, Tooltip } from 'antd';
 import { RobotOutlined, UpOutlined, DownOutlined } from '@ant-design/icons';
 import MasterAgentPanel from './MasterAgentPanel';
 import MasterSessionRail from './MasterSessionRail';
-import MasterConfigModal from './MasterConfigModal';
-import { masterDrawerClassName } from './masterDrawerDisplay';
+import {
+  masterDrawerClassName,
+  masterDrawerContentClassName,
+  shouldKeepDrawerContentOpen,
+  shouldScheduleDrawerUnmount,
+} from './masterDrawerDisplay';
 import { useMasterAgentStore } from '../stores/masterAgentStore';
 import { useUiStore } from '../stores/uiStore';
 
 // 收起超过该时长后卸载抽屉内容,释放会话/消息占用的内存与渲染;再次展开即重新挂载。
 const UNMOUNT_DELAY_MS = 5 * 60 * 1000;
-
-export function DrawerModeSwitch({
-  fullscreen,
-  onChange,
-}: {
-  fullscreen: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  const state = fullscreen ? '全屏' : '半屏';
-  return (
-    <Tooltip title={fullscreen ? '切换为半屏' : '切换为全屏'}>
-      <Switch
-        checked={fullscreen}
-        checkedChildren="全屏"
-        unCheckedChildren="半屏"
-        aria-label={`姬子显示模式，当前${state}`}
-        onChange={onChange}
-      />
-    </Tooltip>
-  );
-}
 
 // 顶部抽屉外壳:pill 徽章触发展开/收起。展开即挂载(mounted)内容,
 // 并保留在 DOM 里靠 CSS height 过渡;收起超过 UNMOUNT_DELAY_MS 后卸载,省去无谓的内存与渲染。
@@ -40,9 +22,9 @@ function MasterAgentDrawer() {
   const expanded = useUiStore((s) => s.drawerExpanded);
   const setExpanded = useUiStore((s) => s.setDrawerExpanded);
   const fullscreen = useUiStore((s) => s.drawerFullscreen);
-  const setFullscreen = useUiStore((s) => s.setDrawerFullscreen);
-  const [configOpen, setConfigOpen] = useState(false);
+  const view = useUiStore((s) => s.view);
   const [mounted, setMounted] = useState(false);
+  const [fullscreenClosing, setFullscreenClosing] = useState(false);
   const unmountTimerRef = useRef<number | null>(null);
   // 是否有任意会话正在生成回复(不区分当前会话,因为卸载会 abort 所有 in-flight)
   const anySending = useMasterAgentStore((s) =>
@@ -59,60 +41,76 @@ function MasterAgentDrawer() {
       }
     };
     if (expanded) {
+      setFullscreenClosing(false);
       // 展开即挂载并打断倒计时
       setMounted(true);
       clearTimer();
-    } else if (mounted) {
+    } else if (
+      shouldScheduleDrawerUnmount({
+        expanded,
+        mounted,
+        anySending,
+        view,
+      })
+    ) {
       clearTimer();
-      // 有任务在跑时不设倒计时;等 anySending 变 false 时 effect 重跑再设
-      if (!anySending) {
-        unmountTimerRef.current = window.setTimeout(
-          () => setMounted(false),
-          UNMOUNT_DELAY_MS,
-        );
-      }
+      unmountTimerRef.current = window.setTimeout(
+        () => setMounted(false),
+        UNMOUNT_DELAY_MS,
+      );
+    } else {
+      clearTimer();
     }
     return clearTimer;
-  }, [expanded, mounted, anySending]);
+  }, [anySending, expanded, mounted, view]);
+
+  const contentOpen = shouldKeepDrawerContentOpen(expanded, fullscreenClosing);
+  const toggleExpanded = () => {
+    if (expanded && fullscreen) {
+      setFullscreenClosing(true);
+      setExpanded(false);
+      return;
+    }
+    setExpanded((value) => !value);
+  };
+  const finishFullscreenClose = (event: React.AnimationEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && fullscreenClosing) {
+      setFullscreenClosing(false);
+    }
+  };
 
   return (
-    <div className={masterDrawerClassName(expanded, fullscreen)}>
+    <div className={masterDrawerClassName(expanded, fullscreen, fullscreenClosing)}>
       <div className="master-drawer__bar">
         <button
           type="button"
           className="master-drawer__trigger"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={toggleExpanded}
           aria-label={expanded ? '收起姬子' : '展开姬子'}
           title={expanded ? '收起姬子' : '展开姬子'}
         >
           <span className="master-drawer__handle">
             <RobotOutlined />
             姬子
-            {expanded ? <UpOutlined /> : <DownOutlined />}
+            {contentOpen ? <UpOutlined /> : <DownOutlined />}
           </span>
         </button>
-        {expanded && (
-          <div className="master-drawer__mode">
-            <DrawerModeSwitch
-              fullscreen={fullscreen}
-              onChange={setFullscreen}
-            />
-          </div>
-        )}
       </div>
       <div
-        className={`master-drawer__content${
-          expanded ? ' master-drawer__content--open' : ''
-        }`}
+        className={masterDrawerContentClassName(
+          expanded,
+          fullscreen,
+          fullscreenClosing,
+        )}
+        onAnimationEnd={finishFullscreenClose}
       >
         {mounted && (
           <div className="master-drawer__layout">
-            <MasterSessionRail onOpenConfig={() => setConfigOpen(true)} />
+            <MasterSessionRail />
             <MasterAgentPanel />
           </div>
         )}
       </div>
-      <MasterConfigModal open={configOpen} onClose={() => setConfigOpen(false)} />
     </div>
   );
 }

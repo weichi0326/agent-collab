@@ -22,13 +22,36 @@ export function upstreamNames(
   edges: Edge[],
   nodeId: string,
 ): string[] {
-  const names: string[] = [];
-  for (const e of edges) {
-    if (e.target !== nodeId) continue;
-    const src = nodes.find((n) => n.id === e.source);
-    if (!src) continue;
-    const d = src.data as AgentNodeData;
-    names.push((typeof d?.label === 'string' && d.label) || 'Agent');
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const incoming = new Map<string, string[]>();
+  for (const edge of edges) {
+    const sources = incoming.get(edge.target) ?? [];
+    sources.push(edge.source);
+    incoming.set(edge.target, sources);
   }
+
+  const names: string[] = [];
+  const visited = new Set<string>();
+  const collectSourceName = (sourceId: string) => {
+    if (visited.has(sourceId)) return;
+    visited.add(sourceId);
+
+    const src = nodesById.get(sourceId);
+    if (!src) return;
+    const d = src.data as AgentNodeData;
+
+    // 门控节点只负责控制与透传，不是真正的数据生产者。
+    if (d.gateType) {
+      const parents = incoming.get(src.id) ?? [];
+      if (parents.length > 0) {
+        parents.forEach(collectSourceName);
+        return;
+      }
+    }
+
+    names.push((typeof d?.label === 'string' && d.label) || 'Agent');
+  };
+
+  (incoming.get(nodeId) ?? []).forEach(collectSourceName);
   return names;
 }

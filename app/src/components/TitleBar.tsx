@@ -1,14 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import { Space, Button, App, Modal, Input, Dropdown } from 'antd';
-import type { MenuProps } from 'antd';
+import { useEffect, useRef, useState, type Ref } from 'react';
+import { Space, Button, App, Modal, Input } from 'antd';
 import {
   BarChartOutlined,
   PlayCircleOutlined,
   StopOutlined,
   SaveOutlined,
-  ApiOutlined,
-  GlobalOutlined,
-  ToolOutlined,
   ReloadOutlined,
   FolderOpenOutlined,
   ArrowLeftOutlined,
@@ -19,9 +15,6 @@ import {
   validateCanvasName,
   isCanvasDirty,
 } from '../stores/canvasStore';
-import ModelConfigModal from './ModelConfigModal';
-import SearchConfigModal from './SearchConfigModal';
-import ToolConfigModal from './ToolConfigModal';
 import ServiceStatusDot from './ServiceStatusDot';
 import {
   removeRunArtifacts,
@@ -35,15 +28,99 @@ import {
   unregisterRunController,
 } from '../lib/runControllers';
 import { useAbortedRunStore } from '../stores/abortedRunStore';
+import { useUiStore, type AppView } from '../stores/uiStore';
+import { appViewLabel } from '../settings/appView';
+import { requiresSettingsLeaveConfirmation } from '../settings/settingsNavigation';
 
 interface TitleBarProps {
-  view: 'workspace' | 'reports';
-  setView: (view: 'workspace' | 'reports') => void;
+  view: AppView;
+  setView: (view: AppView) => void;
   onRefreshReports: () => void;
 }
 
+interface PrimaryViewActionsProps {
+  view: AppView;
+  onWorkspace: () => void;
+  onReports: () => void;
+  onSettings: () => void;
+  onRefreshReports: () => void;
+  onOpenOutput: () => void;
+  settingsButtonRef?: Ref<HTMLAnchorElement | HTMLButtonElement>;
+}
+
+interface FocusTarget {
+  focus: () => void;
+}
+
+// oxlint-disable-next-line react/only-export-components
+export function restoreSettingsButtonFocus(
+  previousView: AppView,
+  view: AppView,
+  target: FocusTarget | null,
+): void {
+  if (previousView === 'settings' && view === 'workspace') {
+    target?.focus();
+  }
+}
+
+export function PrimaryViewActions({
+  view,
+  onWorkspace,
+  onReports,
+  onSettings,
+  onRefreshReports,
+  onOpenOutput,
+  settingsButtonRef,
+}: PrimaryViewActionsProps) {
+  if (view === 'reports') {
+    return (
+      <nav className="title-bar__view-nav" aria-label="一级页面">
+        <Space>
+          <Button size="small" icon={<ArrowLeftOutlined />} onClick={onWorkspace}>
+            返回工作台
+          </Button>
+          <Button size="small" icon={<ReloadOutlined />} onClick={onRefreshReports}>
+            刷新
+          </Button>
+          <Button size="small" icon={<FolderOpenOutlined />} onClick={onOpenOutput}>
+            打开输出目录
+          </Button>
+        </Space>
+      </nav>
+    );
+  }
+  if (view === 'settings') {
+    return (
+      <nav className="title-bar__view-nav" aria-label="一级页面">
+        <Button size="small" icon={<ArrowLeftOutlined />} onClick={onWorkspace}>
+          返回工作台
+        </Button>
+      </nav>
+    );
+  }
+  return (
+    <nav className="title-bar__view-nav" aria-label="一级页面">
+      <Space>
+        <Button size="small" icon={<BarChartOutlined />} onClick={onReports}>
+          报告中心
+        </Button>
+        <Button
+          ref={settingsButtonRef}
+          size="small"
+          icon={<SettingOutlined />}
+          onClick={onSettings}
+        >
+          设置
+        </Button>
+      </Space>
+    </nav>
+  );
+}
+
 function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  const settingsButtonRef = useRef<HTMLAnchorElement | HTMLButtonElement>(null);
+  const previousViewRef = useRef(view);
   const activeId = useCanvasStore((s) => s.activeId);
   const activeCanvas = useCanvasStore((s) =>
     s.canvases.find((c) => c.id === s.activeId),
@@ -60,9 +137,6 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
   const [pendingRun, setPendingRun] = useState(false);
   // 已保存但有改动时,运行前弹「另存为新名 / 覆盖保存」选择框
   const [dirtyRunOpen, setDirtyRunOpen] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [toolOpen, setToolOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [restartingBackend, setRestartingBackend] = useState(false);
   // 中止残留产物清理走共享 store:整图运行与姬子子图重跑中止都汇入同一「任务已中止」Modal。
@@ -71,6 +145,17 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
   const clearAbortedRun = useAbortedRunStore((s) => s.clearAbortedRun);
   const [removingArtifacts, setRemovingArtifacts] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const settingsDirty = useUiStore((state) => state.settingsDirty);
+  const setSettingsDirty = useUiStore((state) => state.setSettingsDirty);
+
+  useEffect(() => {
+    restoreSettingsButtonFocus(
+      previousViewRef.current,
+      view,
+      settingsButtonRef.current,
+    );
+    previousViewRef.current = view;
+  }, [view]);
 
   const readOnly = !!activeCanvas?.readOnly;
   const onRestartBackend = async () => {
@@ -283,16 +368,26 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
     return () => window.removeEventListener('agent-titlebar-command', handler);
   }, []);
 
-  const settingsItems: MenuProps['items'] = [
-    { key: 'model', icon: <ApiOutlined />, label: '模型配置' },
-    { key: 'search', icon: <GlobalOutlined />, label: '搜索配置' },
-    { key: 'tool', icon: <ToolOutlined />, label: '工具库' },
-  ];
+  const openWorkspace = () => {
+    if (view !== 'settings' || !requiresSettingsLeaveConfirmation(settingsDirty)) {
+      setView('workspace');
+      return;
+    }
+    modal.confirm({
+      title: '放弃未保存的修改？',
+      content: '当前设置页有尚未保存的内容。返回工作台后这些修改将丢失。',
+      okText: '放弃修改',
+      cancelText: '继续编辑',
+      onOk: () => {
+        setSettingsDirty(false);
+        setView('workspace');
+      },
+    });
+  };
 
-  const onSettingsClick: MenuProps['onClick'] = ({ key }) => {
-    if (key === 'model') setModelOpen(true);
-    else if (key === 'search') setSearchOpen(true);
-    else if (key === 'tool') setToolOpen(true);
+  const openSettings = () => {
+    setSettingsDirty(false);
+    setView('settings');
   };
 
   return (
@@ -300,52 +395,23 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
       <div className="title-bar__logo">AI</div>
       <span className="title-bar__name">多 Agent 协同工具</span>
       <span className={`title-bar__mode title-bar__mode--${view}`}>
-        {view === 'reports' ? '报告中心' : '工作台'}
+        {appViewLabel(view)}
       </span>
       <div className="title-bar__spacer" />
-      {view === 'reports' ? (
+      {view === 'workspace' ? (
         <Space>
-          <Button
-            size="small"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => setView('workspace')}
-          >
-            返回工作台
-          </Button>
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            onClick={onRefreshReports}
-          >
-            刷新
-          </Button>
-          <Button
-            size="small"
-            icon={<FolderOpenOutlined />}
-            onClick={() => void onOpenOutputDir()}
-          >
-            打开输出目录
-          </Button>
-        </Space>
-      ) : (
-      <Space>
+          <PrimaryViewActions
+            view={view}
+            onWorkspace={openWorkspace}
+            onReports={() => setView('reports')}
+            onSettings={openSettings}
+            onRefreshReports={onRefreshReports}
+            onOpenOutput={() => void onOpenOutputDir()}
+            settingsButtonRef={settingsButtonRef}
+        />
         <Button
-          size="small"
-          icon={<BarChartOutlined />}
-          onClick={() => setView('reports')}
-        >
-          报告中心
-        </Button>
-        <Dropdown
-          menu={{ items: settingsItems, onClick: onSettingsClick }}
-          trigger={['click']}
-        >
-          <Button size="small" icon={<SettingOutlined />}>
-            设置
-          </Button>
-        </Dropdown>
-        <Button
-          className="title-bar__restart-backend"
+          className="title-bar__restart-backend title-bar__compact-action"
+          aria-label="重启后台"
           size="small"
           loading={restartingBackend}
           disabled={running}
@@ -357,6 +423,8 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
           </span>
         </Button>
         <Button
+          className="title-bar__compact-action"
+          aria-label="保存"
           size="small"
           icon={<SaveOutlined />}
           disabled={readOnly || running}
@@ -366,6 +434,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
           保存
         </Button>
         <Button
+          className="title-bar__save-as"
           size="small"
           disabled={readOnly || running}
           title={readOnly ? '只读快照不可另存' : '另存为一个新画布'}
@@ -374,6 +443,8 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
           另存为
         </Button>
         <Button
+          className="title-bar__compact-action"
+          aria-label={running ? '中止任务' : '运行'}
           size="small"
           type="primary"
           danger={running}
@@ -385,6 +456,15 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
           {running ? '中止任务' : '运行'}
         </Button>
       </Space>
+      ) : (
+        <PrimaryViewActions
+          view={view}
+          onWorkspace={openWorkspace}
+          onReports={() => setView('reports')}
+          onSettings={openSettings}
+          onRefreshReports={onRefreshReports}
+          onOpenOutput={() => void onOpenOutputDir()}
+        />
       )}
 
       <Modal
@@ -396,7 +476,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
         cancelText="取消"
         destroyOnHidden
       >
-        <p style={{ color: '#86909c', marginBottom: 8 }}>
+        <p className="pearl-modal-copy pearl-modal-copy--compact">
           {namingMode === 'saveAs'
             ? '为新画布命名(不能直接使用默认名)'
             : '首次保存需要为画布命名(不能直接使用默认名)'}
@@ -429,7 +509,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
           </Button>,
         ]}
       >
-        <p style={{ color: '#86909c' }}>
+        <p className="pearl-modal-copy">
           当前画布有未保存的改动,运行前需先保存。你可以覆盖保存到原画布,或另存为一个新画布。
         </p>
       </Modal>
@@ -458,18 +538,14 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
           </Button>,
         ]}
       >
-        <p style={{ color: '#4e5969', marginBottom: 8 }}>
+        <p className="pearl-modal-copy pearl-modal-copy--compact">
           本次任务已中止，但已经生成了 {abortedRun?.artifacts.length ?? 0}{' '}
           个产物文件。请选择是否保留这些文件。
         </p>
-        <p style={{ color: '#86909c', marginBottom: 0 }}>
+        <p className="pearl-modal-copy pearl-modal-copy--last">
           选择移除后，会删除已知产物文件，并尝试清理空的产物文件夹。
         </p>
       </Modal>
-
-      <ModelConfigModal open={modelOpen} onClose={() => setModelOpen(false)} />
-      <SearchConfigModal open={searchOpen} onClose={() => setSearchOpen(false)} />
-      <ToolConfigModal open={toolOpen} onClose={() => setToolOpen(false)} />
     </div>
   );
 }

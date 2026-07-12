@@ -6,6 +6,7 @@ import { getClipboard, setClipboard } from './clipboard';
 
 interface UseCanvasHotkeysParams {
   activeId: string;
+  enabled: boolean;
   openSearch: () => void;
   screenToFlowPosition: ReactFlowInstance['screenToFlowPosition'];
   onCrossCanvasPaste?: () => void;
@@ -13,6 +14,7 @@ interface UseCanvasHotkeysParams {
 
 export function useCanvasHotkeys({
   activeId,
+  enabled,
   openSearch,
   screenToFlowPosition,
   onCrossCanvasPaste,
@@ -28,6 +30,7 @@ export function useCanvasHotkeys({
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     const { pushHistory, undo, addGraph } = useCanvasStore.getState();
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
@@ -136,7 +139,7 @@ export function useCanvasHotkeys({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [activeId, openSearch]);
+  }, [activeId, enabled, openSearch]);
 
   return { onMouseMove };
 }

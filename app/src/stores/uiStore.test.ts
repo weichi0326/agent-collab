@@ -14,7 +14,13 @@ Object.defineProperty(globalThis, 'localStorage', {
 describe('uiStore drawer display mode', () => {
   beforeEach(() => {
     storage.clear();
-    useUiStore.setState({ drawerExpanded: false, drawerFullscreen: false });
+    useUiStore.setState({
+      drawerExpanded: false,
+      drawerFullscreen: false,
+      view: 'workspace',
+      settingsSection: 'models',
+      settingsDirty: false,
+    });
   });
 
   it('defaults to half height and updates fullscreen mode explicitly', () => {
@@ -34,5 +40,28 @@ describe('uiStore drawer display mode', () => {
 
     expect(persisted.drawerFullscreen).toBe(true);
     expect(persisted).not.toHaveProperty('drawerExpanded');
+  });
+
+  it('tracks settings navigation during the current session', () => {
+    useUiStore.getState().setView('settings');
+    useUiStore.getState().setSettingsSection('tools');
+    useUiStore.getState().setSettingsDirty(true);
+
+    expect(useUiStore.getState().view).toBe('settings');
+    expect(useUiStore.getState().settingsSection).toBe('tools');
+    expect(useUiStore.getState().settingsDirty).toBe(true);
+  });
+
+  it('does not persist settings navigation state', () => {
+    const persisted = partializeUiState({
+      ...useUiStore.getState(),
+      view: 'settings',
+      settingsSection: 'tools',
+      settingsDirty: true,
+    });
+
+    expect(persisted).not.toHaveProperty('view');
+    expect(persisted).not.toHaveProperty('settingsSection');
+    expect(persisted).not.toHaveProperty('settingsDirty');
   });
 });

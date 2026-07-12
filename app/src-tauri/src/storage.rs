@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tauri::Manager;
 
 // M12 修复：value 大小上限（10 MB），防止单次写盘超大 JSON 导致磁盘耗尽
 const MAX_VALUE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
@@ -14,6 +16,11 @@ const MAX_KEY_LEN: usize = 100;
 const OUTPUT_REPORT_LIMIT: usize = 80;
 const OUTPUT_REPORT_SCAN_TARGET: usize = 200;
 const OUTPUT_REPORT_MAX_DIRS: usize = 5000;
+const DIRECTORY_SCAN_MAX_ENTRIES: usize = 20_000;
+const DIRECTORY_SCAN_MAX_DEPTH: usize = 64;
+const DIRECTORY_USAGE_DETAIL_LIMIT: usize = 8;
+const DIRECTORY_WRITE_PROBE_NAME: &str = ".system-write-probe.tmp";
+static DIRECTORY_WRITE_PROBE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Serialize)]
 pub struct OutputReport {
@@ -35,6 +42,39 @@ pub struct JiziSkillFile {
     id: String,
     path: String,
     content: String,
+}
+
+#[derive(Serialize)]
+pub struct SystemCheck {
+    id: String,
+    label: String,
+    ok: bool,
+    detail: String,
+    repair: String,
+}
+
+#[derive(Serialize)]
+pub struct DirectoryUsage {
+    bytes: u64,
+    complete: bool,
+    detail: String,
+}
+
+#[derive(Serialize)]
+pub struct SystemSnapshot {
+    app_version: String,
+    backend_version: String,
+    os: String,
+    arch: String,
+    data_dir: String,
+    app_data_dir: String,
+    output_dir: String,
+    log_dir: String,
+    data_usage: DirectoryUsage,
+    app_data_usage: DirectoryUsage,
+    output_usage: DirectoryUsage,
+    log_usage: DirectoryUsage,
+    checks: Vec<SystemCheck>,
 }
 
 // 数据根目录:所有 store 的 JSON 都存在这里,随项目文件夹迁移。
@@ -162,6 +202,367 @@ fn output_dir_path() -> Result<PathBuf, String> {
     let dir = app_base_dir()?.join("outputs");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
+}
+
+fn mark_directory_usage_incomplete(complete: &mut bool, details: &mut Vec<String>, detail: String) {
+    *complete = false;
+    if details.len() < DIRECTORY_USAGE_DETAIL_LIMIT {
+        details.push(detail);
+    }
+}
+
+fn add_directory_usage_bytes(
+    bytes: &mut u64,
+    additional_bytes: u64,
+    complete: &mut bool,
+    details: &mut Vec<String>,
+) {
+    match bytes.checked_add(additional_bytes) {
+        Some(total) => *bytes = total,
+        None => {
+            *bytes = u64::MAX;
+            mark_directory_usage_incomplete(
+                complete,
+                details,
+                "目录累计大小超过可表示的大小上限".to_string(),
+            );
+        }
+    }
+}
+
+fn directory_usage(path: &Path) -> DirectoryUsage {
+    directory_usage_with_limits(path, DIRECTORY_SCAN_MAX_ENTRIES, DIRECTORY_SCAN_MAX_DEPTH)
+}
+
+fn directory_usage_with_limits(
+    path: &Path,
+    max_entries: usize,
+    max_depth: usize,
+) -> DirectoryUsage {
+    let mut bytes = 0_u64;
+    let mut complete = true;
+    let mut details = Vec::new();
+    let mut pending = vec![(path.to_path_buf(), 0_usize)];
+    let mut scanned_entries = 0_usize;
+    let mut entry_budget_exhausted = false;
+
+    while let Some((current, depth)) = pending.pop() {
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                mark_directory_usage_incomplete(
+                    &mut complete,
+                    &mut details,
+                    format!("无法读取 {}：{error}", current.display()),
+                );
+                continue;
+            }
+        };
+
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_file() {
+            add_directory_usage_bytes(&mut bytes, metadata.len(), &mut complete, &mut details);
+            continue;
+        }
+        if !metadata.is_dir() {
+            continue;
+        }
+
+        if entry_budget_exhausted {
+            continue;
+        }
+
+        if depth >= max_depth {
+            match fs::read_dir(&current) {
+                Ok(mut entries) => {
+                    if entries.next().is_some() {
+                        mark_directory_usage_incomplete(
+                            &mut complete,
+                            &mut details,
+                            format!("目录达到深度上限 {max_depth}：{}", current.display()),
+                        );
+                    }
+                }
+                Err(error) => mark_directory_usage_incomplete(
+                    &mut complete,
+                    &mut details,
+                    format!("无法读取目录 {}：{error}", current.display()),
+                ),
+            }
+            continue;
+        }
+
+        let entries = match fs::read_dir(&current) {
+            Ok(entries) => entries,
+            Err(error) => {
+                mark_directory_usage_incomplete(
+                    &mut complete,
+                    &mut details,
+                    format!("无法读取目录 {}：{error}", current.display()),
+                );
+                continue;
+            }
+        };
+
+        for entry in entries {
+            if scanned_entries >= max_entries {
+                mark_directory_usage_incomplete(
+                    &mut complete,
+                    &mut details,
+                    format!("目录扫描达到条目上限 {max_entries}：{}", current.display()),
+                );
+                entry_budget_exhausted = true;
+                break;
+            }
+            scanned_entries += 1;
+            match entry {
+                Ok(entry) => pending.push((entry.path(), depth + 1)),
+                Err(error) => mark_directory_usage_incomplete(
+                    &mut complete,
+                    &mut details,
+                    format!("读取目录项失败 {}：{error}", current.display()),
+                ),
+            }
+        }
+    }
+
+    DirectoryUsage {
+        bytes,
+        complete,
+        detail: if complete {
+            "统计完整".to_string()
+        } else {
+            details.join("；")
+        },
+    }
+}
+
+fn path_check(id: &str, label: &str, path: &Path, repair: &str) -> SystemCheck {
+    let ok = path.is_file();
+    let display = path.to_string_lossy();
+    SystemCheck {
+        id: id.to_string(),
+        label: label.to_string(),
+        ok,
+        detail: if ok {
+            display.into_owned()
+        } else {
+            format!("未找到：{display}")
+        },
+        repair: repair.to_string(),
+    }
+}
+
+fn probe_directory_writable(path: &Path) -> Result<(), String> {
+    probe_directory_writable_with_remover(path, &|probe| fs::remove_file(probe))
+}
+
+fn probe_directory_writable_with_remover<F>(path: &Path, remove_file: &F) -> Result<(), String>
+where
+    F: Fn(&Path) -> std::io::Result<()>,
+{
+    let _guard = DIRECTORY_WRITE_PROBE_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    fs::create_dir_all(path).map_err(|error| error.to_string())?;
+    let probe = path.join(DIRECTORY_WRITE_PROBE_NAME);
+    match fs::symlink_metadata(&probe) {
+        Ok(_) => remove_file(&probe).map_err(|error| format!("清理旧写入探针失败：{error}"))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("检查旧写入探针失败：{error}")),
+    }
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .map_err(|error| error.to_string())?;
+    let write_error = file.write_all(b"system-directory-write-probe").err();
+    drop(file);
+    let cleanup_error = remove_file(&probe).err();
+
+    match (write_error, cleanup_error) {
+        (None, None) => Ok(()),
+        (Some(write_error), None) => Err(write_error.to_string()),
+        (None, Some(cleanup_error)) => Err(format!("删除写入探针失败：{cleanup_error}")),
+        (Some(write_error), Some(cleanup_error)) => Err(format!(
+            "写入探针失败：{write_error}；删除写入探针失败：{cleanup_error}"
+        )),
+    }
+}
+
+fn directory_check(id: &str, label: &str, path: &Path) -> SystemCheck {
+    let probe_result = probe_directory_writable(path);
+    let ok = probe_result.is_ok();
+    let display = path.to_string_lossy();
+    SystemCheck {
+        id: id.to_string(),
+        label: label.to_string(),
+        ok,
+        detail: match probe_result {
+            Ok(()) => display.into_owned(),
+            Err(error) => format!("目录不可写：{display}（{error}）"),
+        },
+        repair: "检查应用目录权限；仍不可用时重新运行环境配置器或重新安装应用。".to_string(),
+    }
+}
+
+fn python_interpreter_path(base: &Path) -> PathBuf {
+    let python_root = base.join("python");
+    if cfg!(debug_assertions) {
+        if cfg!(target_os = "windows") {
+            python_root.join("venv").join("Scripts").join("python.exe")
+        } else {
+            python_root.join("venv").join("bin").join("python")
+        }
+    } else if cfg!(target_os = "windows") {
+        python_root.join("runtime").join("python.exe")
+    } else {
+        python_root.join("runtime").join("bin").join("python3")
+    }
+}
+
+fn build_system_checks(
+    base: &Path,
+    data_dir: &Path,
+    app_data_dir: &Path,
+    output_dir: &Path,
+    log_dir: &Path,
+    include_development_checks: bool,
+) -> Vec<SystemCheck> {
+    let python_interpreter = python_interpreter_path(base);
+    let python_app = base.join("python").join("app.py");
+
+    let mut checks = vec![
+        path_check(
+            "python-interpreter",
+            "Python 解释器",
+            &python_interpreter,
+            "运行环境配置器重新创建 Python 环境；安装版请重新安装应用。",
+        ),
+        path_check(
+            "python-app",
+            "Python 服务入口",
+            &python_app,
+            "确认 python/app.py 未被移动或删除；缺失时重新获取完整应用文件。",
+        ),
+        directory_check("data-directory", "本地数据目录", data_dir),
+        directory_check("app-data-directory", "应用数据目录", app_data_dir),
+        directory_check("output-directory", "输出目录", output_dir),
+        directory_check("log-directory", "日志目录", log_dir),
+    ];
+
+    if include_development_checks {
+        checks.push(path_check(
+            "environment-configurator",
+            "环境配置器",
+            &base.join("环境配置器.bat"),
+            "在完整项目目录中运行“环境配置器.bat”；安装版环境由安装程序维护。",
+        ));
+        checks.push(path_check(
+            "launch-preflight",
+            "启动预检脚本",
+            &base.join("start-preflight.ps1"),
+            "使用完整项目目录中的“启动应用.bat”，或重新获取 start-preflight.ps1。",
+        ));
+    }
+
+    checks
+}
+
+fn build_system_snapshot(base: PathBuf, app_data_dir: PathBuf) -> Result<SystemSnapshot, String> {
+    let data_dir = base.join("data");
+    let output_dir = base.join("outputs");
+    let log_dir = base.join("logs");
+    let checks = build_system_checks(
+        &base,
+        &data_dir,
+        &app_data_dir,
+        &output_dir,
+        &log_dir,
+        cfg!(debug_assertions),
+    );
+    let data_usage = directory_usage(&data_dir);
+    let app_data_usage = directory_usage(&app_data_dir);
+    let output_usage = directory_usage(&output_dir);
+    let log_usage = directory_usage(&log_dir);
+
+    Ok(SystemSnapshot {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        backend_version: env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        data_dir: path_to_string(&data_dir)?,
+        app_data_dir: path_to_string(&app_data_dir)?,
+        output_dir: path_to_string(&output_dir)?,
+        log_dir: path_to_string(&log_dir)?,
+        data_usage,
+        app_data_usage,
+        output_usage,
+        log_usage,
+        checks,
+    })
+}
+
+#[tauri::command]
+pub async fn system_snapshot(app: tauri::AppHandle) -> Result<SystemSnapshot, String> {
+    let base = app_base_dir()?;
+    let app_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法定位应用数据目录：{error}"))?;
+
+    tauri::async_runtime::spawn_blocking(move || build_system_snapshot(base, app_data_dir))
+        .await
+        .map_err(|error| format!("系统快照任务失败：{error}"))?
+}
+
+fn resolve_system_directory(
+    base: &Path,
+    app_data_dir: &Path,
+    kind: &str,
+) -> Result<PathBuf, String> {
+    match kind {
+        "data" => Ok(base.join("data")),
+        "app_data" => Ok(app_data_dir.to_path_buf()),
+        "output" => Ok(base.join("outputs")),
+        "log" => Ok(base.join("logs")),
+        _ => Err(format!("未知系统目录：{kind}")),
+    }
+}
+
+#[tauri::command]
+pub fn open_system_directory(app: tauri::AppHandle, kind: String) -> Result<(), String> {
+    let base = app_base_dir()?;
+    let app_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法定位应用数据目录：{error}"))?;
+    let target = resolve_system_directory(&base, &app_data_dir, &kind)?;
+    if !target.is_dir() {
+        return Err(format!("系统目录不存在或不可用：{}", target.display()));
+    }
+
+    let mut command = if cfg!(target_os = "windows") {
+        let mut command = Command::new("explorer.exe");
+        command.arg(&target);
+        command
+    } else if cfg!(target_os = "macos") {
+        let mut command = Command::new("open");
+        command.arg(&target);
+        command
+    } else {
+        let mut command = Command::new("xdg-open");
+        command.arg(&target);
+        command
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("打开系统目录失败：{error}"))
 }
 
 #[tauri::command]
@@ -778,6 +1179,179 @@ pub fn storage_remove(key: String) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn directory_usage_counts_nested_files() {
+        let root = temp_dir("system-snapshot-size");
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("a.bin"), [0_u8; 3]).unwrap();
+        fs::write(root.join("nested").join("b.bin"), [0_u8; 5]).unwrap();
+
+        let usage = directory_usage_with_limits(&root, 20_000, 64);
+
+        assert_eq!(usage.bytes, 8);
+        assert!(usage.complete, "{}", usage.detail);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn directory_usage_marks_entry_limit_incomplete() {
+        let root = temp_dir("system-snapshot-entry-limit");
+        fs::write(root.join("a.bin"), [0_u8; 1]).unwrap();
+        fs::write(root.join("b.bin"), [0_u8; 1]).unwrap();
+        fs::write(root.join("c.bin"), [0_u8; 1]).unwrap();
+
+        let usage = directory_usage_with_limits(&root, 2, 64);
+
+        assert_eq!(usage.bytes, 2);
+        assert!(!usage.complete);
+        assert!(usage.detail.contains("条目上限"), "{}", usage.detail);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn directory_usage_applies_entry_limit_across_nested_directories() {
+        let root = temp_dir("system-snapshot-global-entry-limit");
+        fs::create_dir_all(root.join("first")).unwrap();
+        fs::create_dir_all(root.join("second")).unwrap();
+        fs::write(root.join("first").join("a.bin"), [0_u8; 1]).unwrap();
+        fs::write(root.join("second").join("b.bin"), [0_u8; 1]).unwrap();
+
+        let usage = directory_usage_with_limits(&root, 2, 64);
+
+        assert!(!usage.complete);
+        assert!(usage.detail.contains("条目上限"), "{}", usage.detail);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn directory_usage_marks_byte_overflow_incomplete() {
+        let mut bytes = u64::MAX - 1;
+        let mut complete = true;
+        let mut details = Vec::new();
+
+        add_directory_usage_bytes(&mut bytes, 2, &mut complete, &mut details);
+
+        assert_eq!(bytes, u64::MAX);
+        assert!(!complete);
+        assert!(details.join("；").contains("大小上限"));
+    }
+
+    #[test]
+    fn directory_usage_marks_depth_limit_incomplete() {
+        let root = temp_dir("system-snapshot-depth-limit");
+        fs::create_dir_all(root.join("nested").join("deeper")).unwrap();
+        fs::write(
+            root.join("nested").join("deeper").join("value.bin"),
+            [0_u8; 5],
+        )
+        .unwrap();
+
+        let usage = directory_usage_with_limits(&root, 20_000, 1);
+
+        assert_eq!(usage.bytes, 0);
+        assert!(!usage.complete);
+        assert!(usage.detail.contains("深度上限"), "{}", usage.detail);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn release_system_checks_omit_development_scripts() {
+        let root = temp_dir("system-snapshot-release-checks");
+        let data = root.join("data");
+        let app_data = root.join("app-data");
+        let output = root.join("outputs");
+        let log = root.join("logs");
+
+        let checks = build_system_checks(&root, &data, &app_data, &output, &log, false);
+
+        assert!(checks
+            .iter()
+            .all(|check| check.id != "environment-configurator"));
+        assert!(checks.iter().all(|check| check.id != "launch-preflight"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unknown_system_directory_kind_is_rejected() {
+        let base = PathBuf::from("base");
+        let app_data = PathBuf::from("app-data");
+
+        let error = resolve_system_directory(&base, &app_data, "secrets").unwrap_err();
+
+        assert!(error.contains("未知系统目录"), "{error}");
+    }
+
+    #[test]
+    fn directory_write_probe_is_removed_after_success() {
+        let root = temp_dir("system-snapshot-write-probe");
+
+        probe_directory_writable(&root).unwrap();
+
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn directory_write_probe_does_not_accumulate_when_cleanup_is_denied() {
+        let root = temp_dir("system-snapshot-write-probe-cleanup-denied");
+        let deny_cleanup = |_probe: &Path| -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "cleanup denied",
+            ))
+        };
+
+        let first_error = probe_directory_writable_with_remover(&root, &deny_cleanup).unwrap_err();
+        let second_error = probe_directory_writable_with_remover(&root, &deny_cleanup).unwrap_err();
+        let entries: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .collect();
+
+        assert!(first_error.contains("删除写入探针失败"), "{first_error}");
+        assert!(
+            second_error.contains("清理旧写入探针失败"),
+            "{second_error}"
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].file_name().to_string_lossy(),
+            ".system-write-probe.tmp"
+        );
+
+        fs::remove_file(entries[0].path()).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn directory_write_probe_serializes_concurrent_checks_for_same_directory() {
+        let root = Arc::new(temp_dir("system-snapshot-write-probe-concurrent"));
+        let barrier = Arc::new(Barrier::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let root = Arc::clone(&root);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    probe_directory_writable(&root)
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+        assert_eq!(fs::read_dir(root.as_path()).unwrap().count(), 0);
+
+        fs::remove_dir_all(root.as_path()).unwrap();
+    }
 
     #[test]
     fn skill_limits_count_unicode_characters_not_utf8_bytes() {

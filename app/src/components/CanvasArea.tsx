@@ -1,16 +1,18 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   BackgroundVariant,
   Controls,
+  ConnectionMode,
   MarkerType,
   useReactFlow,
   type NodeChange,
   type EdgeChange,
   type Connection,
   type Node,
+  type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { App, Button, Input, Modal } from 'antd';
@@ -41,17 +43,32 @@ import { RunStatusCard } from './CanvasArea/RunStatusCard';
 import { SearchPanel } from './CanvasArea/SearchPanel';
 import { useCanvasSearch } from './CanvasArea/useCanvasSearch';
 import { useCanvasHotkeys } from './CanvasArea/useCanvasHotkeys';
+import { useUiStore } from '../stores/uiStore';
+import { workspaceInteractionState } from '../settings/appView';
+import {
+  routeEdgesForNodes,
+  validateConnection,
+} from './CanvasArea/edgeRouting';
+import { EditableOrthogonalEdge } from './CanvasArea/EditableOrthogonalEdge';
+import { AlignmentGuides } from './CanvasArea/AlignmentGuides';
+import {
+  snapNodeChangesToAlignment,
+  type AlignmentGuide,
+} from '../lib/alignmentSnap';
 
 const nodeTypes = { agent: AgentNode, gate: GateNode, timer: TimerNode };
+const edgeTypes = { orthogonal: EditableOrthogonalEdge };
 
 const defaultEdgeOptions = {
-  type: 'default',
+  type: 'orthogonal',
   markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
-  style: { stroke: '#1890ff', strokeWidth: 2 },
+  style: { stroke: 'var(--pearl-accent)', strokeWidth: 1.6 },
 };
 
 function Flow() {
   const { message } = App.useApp();
+  const view = useUiStore((state) => state.view);
+  const interaction = workspaceInteractionState(view);
   const activeId = useCanvasStore((s) => s.activeId);
   const canvas = useCanvasStore((s) =>
     s.canvases.find((c) => c.id === s.activeId),
@@ -66,6 +83,8 @@ function Flow() {
   const renameCanvas = useCanvasStore((s) => s.renameCanvas);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const activeDragNodeId = useRef<string | null>(null);
   const { screenToFlowPosition, fitView, setCenter, getZoom } = useReactFlow();
   const {
     searchOpen,
@@ -82,6 +101,7 @@ function Flow() {
   } = useCanvasSearch({ canvas, setCenter, getZoom });
   const { onMouseMove } = useCanvasHotkeys({
     activeId,
+    enabled: interaction.hotkeysEnabled,
     openSearch,
     screenToFlowPosition,
     onCrossCanvasPaste: () =>
@@ -93,10 +113,18 @@ function Flow() {
   // 捕获阶段 keydown 在 React Flow 处理前记录,change 回调只负责刷新折叠派生态。
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      applyNodes(activeId, changes);
+      const snapped = snapNodeChangesToAlignment({
+        changes,
+        nodes: displayNodes,
+        activeNodeId: activeDragNodeId.current,
+        tolerance: 8 / getZoom(),
+        padding: 20 / getZoom(),
+      });
+      setAlignmentGuides(snapped.guides);
+      applyNodes(activeId, snapped.changes);
       if (changes.some((c) => c.type === 'remove')) recompute(activeId);
     },
-    [activeId, applyNodes, recompute],
+    [activeId, applyNodes, displayNodes, getZoom, recompute],
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
@@ -136,16 +164,39 @@ function Flow() {
   );
   const onConnect = useCallback(
     (params: Connection) => {
+      if (!canvas) return;
+      const validationMessage = validateConnection(
+        canvas.nodes,
+        canvas.edges,
+        params,
+      );
+      if (validationMessage) {
+        message.warning(validationMessage);
+        return;
+      }
       connect(activeId, params);
     },
-    [activeId, connect],
+    [activeId, canvas, connect, message],
   );
 
   // 拖动开始前记录位置快照,支撑「撤销移动」
-  const onNodeDragStart = useCallback(
-    () => pushHistory(activeId),
+  const onNodeDragStart = useCallback<OnNodeDrag>(
+    (_event, node: Node) => {
+      activeDragNodeId.current = node.id;
+      setAlignmentGuides([]);
+      pushHistory(activeId);
+    },
     [activeId, pushHistory],
   );
+  const onNodeDragStop = useCallback(() => {
+    activeDragNodeId.current = null;
+    setAlignmentGuides([]);
+  }, []);
+
+  useEffect(() => {
+    activeDragNodeId.current = null;
+    setAlignmentGuides([]);
+  }, [activeId]);
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -246,6 +297,10 @@ function Flow() {
     collapsibleNodes.length > 0 &&
     collapsibleNodes.every((n) => (n.data as AgentNodeData)?.collapsed);
   const readOnly = !!canvas?.readOnly;
+  const routedEdges = useMemo(
+    () => routeEdgesForNodes(displayNodes, canvas?.edges ?? []),
+    [canvas?.edges, displayNodes],
+  );
 
   if (!canvas) return null;
 
@@ -269,17 +324,20 @@ function Flow() {
     >
       <ReactFlow
         nodes={displayNodes}
-        edges={canvas.edges}
+        edges={routedEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        connectionMode={ConnectionMode.Loose}
         onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
-        nodesDraggable={!readOnly}
-        nodesConnectable={!readOnly}
-        edgesFocusable={!readOnly}
-        deleteKeyCode={readOnly ? null : ['Delete', 'Backspace']}
+        nodesDraggable={interaction.hotkeysEnabled && !readOnly}
+        nodesConnectable={interaction.hotkeysEnabled && !readOnly}
+        edgesFocusable={interaction.hotkeysEnabled && !readOnly}
+        deleteKeyCode={readOnly ? null : interaction.deleteKeyCode}
         selectionKeyCode="Control"
         selectionOnDrag
         defaultViewport={{ x: 0, y: 0, zoom: DEFAULT_ZOOM }}
@@ -292,16 +350,17 @@ function Flow() {
           variant={BackgroundVariant.Lines}
           gap={20}
           size={1}
-          color="#eceef1"
+          color="rgba(111, 120, 116, 0.12)"
         />
         <Background
           id="grid-bold"
           variant={BackgroundVariant.Lines}
           gap={100}
           size={1}
-          color="#dfe3e8"
+          color="rgba(111, 137, 128, 0.24)"
         />
         <Controls showInteractive={false} />
+        <AlignmentGuides guides={alignmentGuides} />
         <CanvasToolbar
           allCollapsed={allCollapsed}
           canCollapse={collapsibleNodes.length > 0}

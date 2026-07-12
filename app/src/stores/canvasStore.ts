@@ -18,6 +18,7 @@ import { makeCanvas } from './canvas/naming';
 import { recomputeDerived } from './canvas/derived';
 import { recoverRunNodes, recoverRunState } from './canvas/runRecovery';
 import { clearOrchestratorRunDiagnosis } from '../lib/orchestratorBridge';
+import type { RoutePoint } from '../lib/orthogonalRoute';
 import {
   cloneEdges,
   cloneRunNodes,
@@ -121,6 +122,11 @@ interface CanvasState {
   applyNodes: (id: string, changes: NodeChange[]) => void;
   applyEdges: (id: string, changes: EdgeChange[]) => void;
   connect: (id: string, connection: Connection) => void;
+  setEdgeRoute: (
+    canvasId: string,
+    edgeId: string,
+    routePoints?: RoutePoint[],
+  ) => void;
   addNode: (id: string, node: Node) => void;
 
   pushHistory: (id: string) => void;
@@ -306,6 +312,28 @@ export const useCanvasStore = create<CanvasState>()(
           }),
           };
         }),
+
+      setEdgeRoute: (canvasId, edgeId, routePoints) =>
+        set((s) => ({
+          canvases: s.canvases.map((canvas) =>
+            canvas.id !== canvasId
+              ? canvas
+              : {
+                  ...canvas,
+                  edges: canvas.edges.map((edge) =>
+                    edge.id !== edgeId
+                      ? edge
+                      : {
+                          ...edge,
+                          data: {
+                            ...edge.data,
+                            routePoints: routePoints?.map((point) => ({ ...point })),
+                          },
+                        },
+                  ),
+                },
+          ),
+        })),
 
       addNode: (id, node) =>
         set((s) => {

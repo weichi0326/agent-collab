@@ -13,6 +13,9 @@ import AgentConfigModal from './components/AgentConfigModal';
 import CommandPalette from './components/CommandPalette';
 import ReportCenter from './components/ReportCenter/ReportCenter';
 import JiziCommandCenter from './components/JiziCommandCenter';
+import SettingsCenter, {
+  LiveAnnouncement,
+} from './components/SettingsCenter/SettingsCenter';
 import { useCanvasStore } from './stores/canvasStore';
 import { useAgentStore } from './stores/agentStore';
 import { useModelStore } from './stores/modelStore';
@@ -23,6 +26,7 @@ import { useToolStore } from './stores/toolStore';
 import { useTokenStatsStore } from './stores/tokenStatsStore';
 import { useOrchestratorStore } from './stores/orchestratorStore';
 import { useJiziSkillSettingsStore } from './stores/jiziSkillStore';
+import { appViewLabel, workspaceLayerState } from './settings/appView';
 import './App.css';
 
 // 桌面端 persist 从项目内 JSON 异步读盘,首帧数据为空。等所有 store 完成 hydration
@@ -89,6 +93,7 @@ function App() {
   const [startupReady, setStartupReady] = useState(false);
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
+  const workspaceState = workspaceLayerState(view);
   const [reportRefreshToken, setReportRefreshToken] = useState(0);
   const ensureCanvas = useCanvasStore((s) => s.ensureCanvas);
   const recoverInterruptedRuns = useCanvasStore((s) => s.recoverInterruptedRuns);
@@ -176,24 +181,37 @@ function App() {
         setView={setView}
         onRefreshReports={() => setReportRefreshToken((v) => v + 1)}
       />
-      {view === 'workspace' && <MasterAgentDrawer />}
-      {view === 'reports' ? (
-        <div className="app-body app-body--reports anim-fade-up">
-          <ReportCenter refreshToken={reportRefreshToken} />
-        </div>
-      ) : (
-        <>
+      <LiveAnnouncement message={`当前页面：${appViewLabel(view)}`} />
+      {workspaceState.mounted && (
+        <div
+          className={`workspace-layer${
+            workspaceState.inert ? ' workspace-layer--inactive' : ''
+          }`}
+          inert={workspaceState.inert}
+          aria-hidden={workspaceState.inert}
+        >
+          <MasterAgentDrawer />
           <JiziCommandCenter />
           <div className="app-body anim-fade">
             <LeftSidebar />
             <div className="canvas-column">
-            <CanvasTabs />
-            <CanvasArea />
-            <CanvasStatusBar />
-          </div>
+              <CanvasTabs />
+              <CanvasArea />
+              <CanvasStatusBar />
+            </div>
             <PropertiesPanel />
           </div>
-        </>
+        </div>
+      )}
+      {view === 'reports' && (
+        <div className="app-body app-body--reports pearl-page-enter">
+          <ReportCenter refreshToken={reportRefreshToken} />
+        </div>
+      )}
+      {view === 'settings' && (
+        <div className="app-view-stage pearl-page-enter">
+          <SettingsCenter />
+        </div>
       )}
       <AgentConfigModal />
       {view === 'workspace' && <CommandPalette />}

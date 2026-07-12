@@ -3,11 +3,19 @@ import { Modal, Input, Button, App, Switch } from 'antd';
 import { ClearOutlined, DeleteOutlined, DownOutlined, InboxOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { useMasterAgentStore, DEFAULT_SYSTEM_PROMPT, type MemoryKind } from '../stores/masterAgentStore';
 import { useOrchestratorStore } from '../stores/orchestratorStore';
+import { useUiStore } from '../stores/uiStore';
 import { TEXT_EXTENSIONS, isTextFile, fileToText } from '../lib/textFile';
+import { isJiziDraftDirty, type JiziDraft } from '../settings/jiziDraft';
 
 interface Props {
   open: boolean;
   onClose: () => void;
+}
+
+export interface JiziSettingsPanelProps {
+  onDirtyChange: (dirty: boolean) => void;
+  onSaved?: () => void;
+  onCancel?: () => void;
 }
 
 const ACCEPT = TEXT_EXTENSIONS.map((ext) => `.${ext}`).join(',');
@@ -27,8 +35,12 @@ function memoryDisplayLines(text: string): string[] {
     .filter(Boolean);
 }
 
-// 姬子配置弹窗:系统提示词只能通过导入本地文本文件设置,不支持手动编辑,支持恢复默认。
-function MasterConfigModal({ open, onClose }: Props) {
+// 系统提示词只能通过导入本地文本文件设置,不支持手动编辑,支持恢复默认。
+export function JiziSettingsPanel({
+  onDirtyChange,
+  onSaved,
+  onCancel,
+}: JiziSettingsPanelProps) {
   const { message } = App.useApp();
   const systemPrompt = useMasterAgentStore((s) => s.systemPrompt);
   const sourceName = useMasterAgentStore((s) => s.systemPromptSourceName);
@@ -39,20 +51,22 @@ function MasterConfigModal({ open, onClose }: Props) {
   const organizeMemory = useMasterAgentStore((s) => s.organizeMemory);
   const autoDiagnose = useOrchestratorStore((s) => s.enabled);
   const setAutoDiagnose = useOrchestratorStore((s) => s.setEnabled);
+  const drawerFullscreen = useUiStore((s) => s.drawerFullscreen);
+  const setDrawerFullscreen = useUiStore((s) => s.setDrawerFullscreen);
 
   const [draft, setDraft] = useState(systemPrompt);
   const [memoryDraft, setMemoryDraft] = useState('');
   const [draftSourceName, setDraftSourceName] = useState<string | null>(sourceName);
+  const [baseline, setBaseline] = useState<JiziDraft>({
+    text: systemPrompt,
+    sourceName,
+  });
   const [previewOpen, setPreviewOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setDraft(systemPrompt);
-      setDraftSourceName(sourceName);
-      setPreviewOpen(false);
-    }
-  }, [open, systemPrompt, sourceName]);
+    onDirtyChange(isJiziDraftDirty({ text: draft, sourceName: draftSourceName }, baseline));
+  }, [baseline, draft, draftSourceName, onDirtyChange]);
 
   const onReset = () => {
     setDraft(DEFAULT_SYSTEM_PROMPT);
@@ -84,8 +98,12 @@ function MasterConfigModal({ open, onClose }: Props) {
       return;
     }
     applySystemPrompt(text, draftSourceName);
+    const savedDraft = { text, sourceName: draftSourceName };
+    setDraft(text);
+    setBaseline(savedDraft);
+    onDirtyChange(false);
     message.success('已保存');
-    onClose();
+    onSaved?.();
   };
 
   const sourceLabel =
@@ -110,25 +128,20 @@ function MasterConfigModal({ open, onClose }: Props) {
   };
 
   return (
-    <Modal
-      title="姬子配置"
-      open={open}
-      onCancel={onClose}
-      destroyOnHidden
-      className="master-config-modal"
-      footer={[
-        <Button key="reset" onClick={onReset}>
-          恢复默认
-        </Button>,
-        <Button key="cancel" onClick={onClose}>
-          取消
-        </Button>,
-        <Button key="save" type="primary" onClick={onSave}>
-          保存
-        </Button>,
-      ]}
-      width={920}
-    >
+    <div className="jizi-settings-panel">
+      <div className="jizi-display-mode-setting">
+        <div className="jizi-display-mode-setting__copy">
+          <strong>显示模式</strong>
+          <span>控制姬子展开后使用半屏还是覆盖工作区。</span>
+        </div>
+        <Switch
+          checked={drawerFullscreen}
+          checkedChildren="全屏"
+          unCheckedChildren="半屏"
+          aria-label={`姬子显示模式，当前${drawerFullscreen ? '全屏' : '半屏'}`}
+          onChange={setDrawerFullscreen}
+        />
+      </div>
       <p style={{ color: '#86909c', marginBottom: 8 }}>
         系统提示词决定姬子的身份设定与回答风格，请选择本地文本文件导入，保存后立即对新消息生效。
       </p>
@@ -253,6 +266,32 @@ function MasterConfigModal({ open, onClose }: Props) {
           </div>
         ))}
       </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <Button onClick={onReset}>恢复默认</Button>
+        {onCancel && <Button onClick={onCancel}>取消</Button>}
+        <Button type="primary" onClick={onSave}>保存</Button>
+      </div>
+    </div>
+  );
+}
+
+function MasterConfigModal({ open, onClose }: Props) {
+  return (
+    <Modal
+      title="姬子配置"
+      open={open}
+      onCancel={onClose}
+      destroyOnHidden
+      className="master-config-modal pearl-dialog"
+      rootClassName="pearl-dialog-root"
+      footer={null}
+      width={920}
+    >
+      <JiziSettingsPanel
+        onDirtyChange={() => undefined}
+        onSaved={onClose}
+        onCancel={onClose}
+      />
     </Modal>
   );
 }

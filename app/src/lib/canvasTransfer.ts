@@ -7,6 +7,7 @@ import { normalizeToolTags } from './toolTagMigration';
 import { uid } from './id';
 import type { ExportResult } from './agentTransfer';
 import type { AgentNodeData, AgentOutputFormat } from '../stores/canvas/types';
+import { readRoutePoints, type RoutePoint } from './orthogonalRoute';
 
 export const CANVAS_EXPORT_KIND = 'canvas-export';
 export const CANVAS_EXPORT_SCHEMA = 1;
@@ -33,6 +34,10 @@ interface ExportNodeData {
   label?: string;
   description?: string;
   systemPrompt?: string;
+  systemPromptSourceName?: string;
+  outputRuleEnabled?: boolean;
+  outputRuleText?: string;
+  outputRuleSourceName?: string;
   toolTags?: string[];
   inputSchemaText?: string;
   outputSchemaText?: string;
@@ -59,6 +64,7 @@ interface ExportEdge {
   sourceHandle?: string | null;
   targetHandle?: string | null;
   type?: string;
+  routePoints?: RoutePoint[];
 }
 
 export interface CanvasExportEnvelope {
@@ -83,6 +89,10 @@ function exportNodeData(data: AgentNodeData): ExportNodeData {
     label: data.label,
     description: data.description,
     systemPrompt: data.systemPrompt,
+    systemPromptSourceName: data.systemPromptSourceName,
+    outputRuleEnabled: data.outputRuleEnabled,
+    outputRuleText: data.outputRuleText,
+    outputRuleSourceName: data.outputRuleSourceName,
     toolTags: Array.isArray(data.toolTags) ? [...data.toolTags] : undefined,
     inputSchemaText: data.inputSchemaText,
     outputSchemaText: data.outputSchemaText,
@@ -115,6 +125,7 @@ export function buildCanvasExport(input: CanvasExportInput): CanvasExportEnvelop
         sourceHandle: e.sourceHandle ?? undefined,
         targetHandle: e.targetHandle ?? undefined,
         type: e.type,
+        routePoints: readRoutePoints(e.data?.routePoints),
       })),
     },
   };
@@ -223,6 +234,10 @@ export function parseCanvasImport(text: string, knownTags: string[]): CanvasImpo
       label: asString(d.label) || 'Agent',
       description: asString(d.description),
       systemPrompt: asString(d.systemPrompt),
+      systemPromptSourceName: asString(d.systemPromptSourceName) || undefined,
+      outputRuleEnabled: d.outputRuleEnabled === true,
+      outputRuleText: asString(d.outputRuleText),
+      outputRuleSourceName: asString(d.outputRuleSourceName) || undefined,
       toolTags,
       modelRef: null,
       inputSchemaText: asString(d.inputSchemaText),
@@ -236,6 +251,9 @@ export function parseCanvasImport(text: string, knownTags: string[]): CanvasImpo
       // 门控节点不调 LLM/工具/无数据源,清掉无关字段避免脏数据。
       data.toolTags = [];
       data.systemPrompt = '';
+      data.outputRuleEnabled = false;
+      data.outputRuleText = '';
+      data.outputRuleSourceName = undefined;
       data.inputSchemaText = '';
       data.outputSchemaText = '';
       data.outputFormat = undefined;
@@ -245,6 +263,9 @@ export function parseCanvasImport(text: string, knownTags: string[]): CanvasImpo
       data.timerSeconds = Math.min(86400, Math.max(1, Math.floor(d.timerSeconds)));
       data.toolTags = [];
       data.systemPrompt = '';
+      data.outputRuleEnabled = false;
+      data.outputRuleText = '';
+      data.outputRuleSourceName = undefined;
       data.inputSchemaText = '';
       data.outputSchemaText = '';
       data.outputFormat = undefined;
@@ -281,6 +302,9 @@ export function parseCanvasImport(text: string, knownTags: string[]): CanvasImpo
       sourceHandle: src.sourceHandle ?? undefined,
       targetHandle: src.targetHandle ?? undefined,
       type: typeof src.type === 'string' ? src.type : undefined,
+      data: {
+        routePoints: readRoutePoints(src.routePoints),
+      },
       selected: false,
     } as Edge);
   }

@@ -8,7 +8,7 @@ import { chat, type LLMConfig } from '../lib/llmClient';
 import { generateToolWithLLM } from '../lib/toolGenerator';
 import { getProvider } from '../lib/providers';
 import { searchWithFailover } from '../lib/searchClient';
-import { getNotification } from '../lib/appNotify';
+import { getMessage, getNotification } from '../lib/appNotify';
 import { actionDefaultCustomValue } from '../components/MasterAgentPanel/actionCustomization';
 import { useUiStore } from './uiStore';
 import { useMasterAgentStore } from './masterAgentStore';
@@ -19,6 +19,7 @@ import {
   type Incident,
   type ReportInput,
 } from '../lib/orchestrator/diagnosis';
+import { canAutoNavigateToWorkspace } from '../settings/settingsNavigation';
 import {
   capIncidents,
   reduceFinalizeRepair,
@@ -103,8 +104,13 @@ export const useOrchestratorStore = create<OrchestratorState>()(
       };
 
       const goToConfirm = (incident: Incident) => {
-        useUiStore.getState().setView('workspace');
-        useUiStore.getState().setDrawerExpanded(true);
+        const ui = useUiStore.getState();
+        if (!canAutoNavigateToWorkspace(ui.view, ui.settingsDirty)) {
+          getMessage()?.warning('设置页有未保存修改，请先保存或放弃修改后再去确认。');
+          return;
+        }
+        ui.setView('workspace');
+        ui.setDrawerExpanded(true);
         useMasterAgentStore.getState().switchSession(incident.sessionId);
         getNotification()?.destroy(NOTIF_KEY);
       };

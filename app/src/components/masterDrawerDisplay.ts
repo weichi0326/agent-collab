@@ -1,8 +1,53 @@
+import type { AppView } from '../stores/uiStore';
+
 export function masterDrawerClassName(
+  _expanded: boolean,
+  _fullscreen: boolean,
+  _fullscreenClosing = false,
+): string {
+  return 'master-drawer master-agent-drawer--pearl master-agent-drawer--half';
+}
+
+export function masterDrawerContentClassName(
   expanded: boolean,
   fullscreen: boolean,
+  fullscreenClosing = false,
 ): string {
-  return expanded && fullscreen
-    ? 'master-drawer master-drawer--fullscreen'
-    : 'master-drawer';
+  const contentOpen = shouldKeepDrawerContentOpen(expanded, fullscreenClosing);
+  const classes = ['master-drawer__content'];
+
+  if (contentOpen) {
+    classes.push('master-drawer__content--open');
+  }
+  if (fullscreen && contentOpen) {
+    classes.push('master-drawer__content--fullscreen');
+  }
+  if (fullscreenClosing) {
+    classes.push('master-drawer__content--fullscreen-closing');
+  } else if (fullscreen && !contentOpen) {
+    classes.push('master-drawer__content--fullscreen-collapsed');
+  }
+
+  return classes.join(' ');
+}
+
+export function shouldKeepDrawerContentOpen(
+  expanded: boolean,
+  fullscreenClosing: boolean,
+): boolean {
+  return expanded || fullscreenClosing;
+}
+
+export function shouldScheduleDrawerUnmount({
+  expanded,
+  mounted,
+  anySending,
+  view,
+}: {
+  expanded: boolean;
+  mounted: boolean;
+  anySending: boolean;
+  view: AppView;
+}): boolean {
+  return !expanded && mounted && !anySending && view === 'workspace';
 }

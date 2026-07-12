@@ -15,6 +15,12 @@ import {
 } from '../stores/modelStore';
 import { ModelList } from './ModelConfigModal/ModelList';
 import { validateModelBaseUrl } from '../lib/modelEndpoint';
+import {
+  canApplyModelSave,
+  isModelDraftDirty,
+  providerDraft,
+  type ModelProviderDraft,
+} from '../settings/modelDraft';
 
 function toLLMConfig(config: ProviderConfig): LLMConfig {
   const preset = getProvider(config.providerId);
@@ -25,13 +31,24 @@ function toLLMConfig(config: ProviderConfig): LLMConfig {
   };
 }
 
-function ModelConfigModal({
-  open,
-  onClose,
-}: {
+export interface ModelSettingsPanelProps {
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+interface ModelConfigModalProps {
   open: boolean;
   onClose: () => void;
-}) {
+}
+
+const EMPTY_MODEL_DRAFT: ModelProviderDraft = {
+  name: '',
+  baseURL: '',
+  apiKey: '',
+};
+
+export function ModelSettingsPanel({
+  onDirtyChange,
+}: ModelSettingsPanelProps) {
   const { message } = App.useApp();
   const configs = useModelStore((s) => s.configs);
   const addProvider = useModelStore((s) => s.addProvider);
@@ -53,6 +70,9 @@ function ModelConfigModal({
   const [name, setName] = useState('');
   const [baseURL, setBaseURL] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [baseline, setBaseline] = useState<ModelProviderDraft>(() =>
+    providerDraft(EMPTY_MODEL_DRAFT),
+  );
   const [newModel, setNewModel] = useState('');
   const [fetchingId, setFetchingId] = useState<string | null>(null);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
@@ -60,10 +80,20 @@ function ModelConfigModal({
   const [savingConfig, setSavingConfig] = useState(false);
   // M2 修复：mounted ref 防止弹窗关闭后 setTest/setFetchingId 写入已卸载组件
   const mountedRef = useRef(true);
+  const saveRevisionRef = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      saveRevisionRef.current += 1;
+    };
   }, []);
+
+  useEffect(() => {
+    onDirtyChange?.(
+      isModelDraftDirty(providerDraft({ name, baseURL, apiKey }), baseline),
+    );
+  }, [apiKey, baseURL, baseline, name, onDirtyChange]);
 
   const kw = search.trim().toLowerCase();
 
@@ -113,27 +143,32 @@ function ModelConfigModal({
     (!!selectedConfig && selectedConfig.providerId === CUSTOM_ID);
 
   const startAdd = (providerId: string) => {
+    if (savingConfig) return;
+    const preset = getProvider(providerId);
+    const draft = providerDraft({
+      name: providerId === CUSTOM_ID ? '' : (preset?.name ?? ''),
+      baseURL: providerId === CUSTOM_ID ? '' : (preset?.baseURL ?? ''),
+      apiKey: '',
+    });
     setDraftProviderId(providerId);
     setSelectedConfigId(undefined);
     setNewModel('');
-    if (providerId === CUSTOM_ID) {
-      setName('');
-      setBaseURL('');
-    } else {
-      const p = getProvider(providerId);
-      setName(p?.name ?? '');
-      setBaseURL(p?.baseURL ?? '');
-    }
-    setApiKey('');
+    setName(draft.name);
+    setBaseURL(draft.baseURL);
+    setApiKey(draft.apiKey);
+    setBaseline(draft);
   };
 
   const selectConfig = (cfg: ProviderConfig) => {
+    if (savingConfig) return;
+    const draft = providerDraft(cfg);
     setSelectedConfigId(cfg.id);
     setDraftProviderId(undefined);
-    setName(cfg.name);
-    setBaseURL(cfg.baseURL);
-    setApiKey(cfg.apiKey);
+    setName(draft.name);
+    setBaseURL(draft.baseURL);
+    setApiKey(draft.apiKey);
     setNewModel('');
+    setBaseline(draft);
   };
 
   const onSave = async () => {
@@ -153,32 +188,70 @@ function ModelConfigModal({
       message.warning('请填写密钥');
       return;
     }
+    const requestRevision = saveRevisionRef.current + 1;
+    saveRevisionRef.current = requestRevision;
+    const requestSelectedConfigId = selectedConfigId;
+    const requestProviderId = draftProviderId;
+    const requestDraft = providerDraft({
+      name: name.trim(),
+      baseURL: baseURL.trim(),
+      apiKey: apiKey.trim(),
+    });
     setSavingConfig(true);
     try {
-      const normalizedBaseURL = await validateModelBaseUrl(baseURL);
-      setBaseURL(normalizedBaseURL);
-      if (selectedConfigId) {
-        updateProvider(selectedConfigId, {
-          name: name.trim(),
-          baseURL: normalizedBaseURL,
-          apiKey: apiKey.trim(),
-        });
+      const normalizedBaseURL = await validateModelBaseUrl(requestDraft.baseURL);
+      if (
+        !canApplyModelSave(
+          mountedRef.current,
+          requestRevision,
+          saveRevisionRef.current,
+        )
+      ) {
+        return;
+      }
+      const savedDraft = providerDraft({
+        name: requestDraft.name,
+        baseURL: normalizedBaseURL,
+        apiKey: requestDraft.apiKey,
+      });
+      setName(savedDraft.name);
+      setBaseURL(savedDraft.baseURL);
+      setApiKey(savedDraft.apiKey);
+      if (requestSelectedConfigId) {
+        updateProvider(requestSelectedConfigId, savedDraft);
         message.success('配置已更新');
-      } else {
+      } else if (requestProviderId) {
         const id = addProvider(
-          draftProviderId!,
-          name.trim(),
-          apiKey.trim(),
-          normalizedBaseURL,
+          requestProviderId,
+          savedDraft.name,
+          savedDraft.apiKey,
+          savedDraft.baseURL,
         );
         setSelectedConfigId(id);
         setDraftProviderId(undefined);
-        message.success(`已保存「${name.trim()}」配置`);
+        message.success(`已保存「${savedDraft.name}」配置`);
       }
+      setBaseline(savedDraft);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '请求接口 URL 校验失败');
+      if (
+        canApplyModelSave(
+          mountedRef.current,
+          requestRevision,
+          saveRevisionRef.current,
+        )
+      ) {
+        message.error(err instanceof Error ? err.message : '请求接口 URL 校验失败');
+      }
     } finally {
-      setSavingConfig(false);
+      if (
+        canApplyModelSave(
+          mountedRef.current,
+          requestRevision,
+          saveRevisionRef.current,
+        )
+      ) {
+        setSavingConfig(false);
+      }
     }
   };
 
@@ -255,6 +328,7 @@ function ModelConfigModal({
         className={`mc-chip${active ? ' mc-chip--active' : ''}${
           opts?.custom ? ' mc-chip--custom' : ''
         }`}
+        disabled={savingConfig}
         onClick={() => startAdd(id)}
       >
         {opts?.custom && <PlusOutlined />}
@@ -265,15 +339,7 @@ function ModelConfigModal({
   };
 
   return (
-    <Modal
-      title="模型配置"
-      open={open}
-      onCancel={onClose}
-      footer={null}
-      width={1040}
-      styles={{ body: { padding: 0 } }}
-    >
-      <div className="mc">
+    <div className="mc">
         {/* 左栏:厂商选择 + 表单 + 已配置实例 */}
         <div className="mc__left">
           <Input
@@ -295,29 +361,36 @@ function ModelConfigModal({
                     className={`mc-inst${
                       c.id === selectedConfigId ? ' mc-inst--active' : ''
                     }`}
-                    onClick={() => selectConfig(c)}
                   >
-                    <span
+                    <button
+                      type="button"
                       className="mc-inst__star"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleStar(c.id);
-                      }}
+                      aria-label={c.starred ? `取消标星 ${c.name}` : `标星 ${c.name}`}
+                      disabled={savingConfig}
+                      onClick={() => toggleStar(c.id)}
                     >
                       {c.starred ? (
-                        <StarFilled style={{ color: '#ffb400' }} />
+                        <StarFilled className="model-favorite-star" />
                       ) : (
                         <StarOutlined />
                       )}
-                    </span>
-                    <span className="mc-inst__name">{c.name}</span>
-                    <span className="mc-inst__badge">
-                      {getProvider(c.providerId)?.name ?? '自定义'}
-                    </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="mc-inst__select"
+                      disabled={savingConfig}
+                      onClick={() => selectConfig(c)}
+                    >
+                      <span className="mc-inst__name">{c.name}</span>
+                      <span className="mc-inst__badge">
+                        {getProvider(c.providerId)?.name ?? '自定义'}
+                      </span>
+                    </button>
                     <Popconfirm
                       title="删除此配置?"
                       okText="删除"
                       cancelText="取消"
+                      disabled={savingConfig}
                       onConfirm={() => {
                         removeProvider(c.id);
                         if (c.id === selectedConfigId) {
@@ -325,10 +398,14 @@ function ModelConfigModal({
                         }
                       }}
                     >
-                      <DeleteOutlined
+                      <button
+                        type="button"
                         className="mc-inst__del"
-                        onClick={(e) => e.stopPropagation()}
-                      />
+                        aria-label={`删除 ${c.name}`}
+                        disabled={savingConfig}
+                      >
+                        <DeleteOutlined />
+                      </button>
                     </Popconfirm>
                   </div>
                 ))}
@@ -357,6 +434,7 @@ function ModelConfigModal({
                 <Input
                   placeholder="例如:公司免费模型"
                   value={name}
+                  disabled={savingConfig}
                   onChange={(e) => setName(e.target.value)}
                 />
               </div>
@@ -365,6 +443,7 @@ function ModelConfigModal({
                 <Input
                   placeholder="https://.../v1"
                   value={baseURL}
+                  disabled={savingConfig}
                   onChange={(e) => setBaseURL(e.target.value)}
                 />
               </div>
@@ -373,6 +452,7 @@ function ModelConfigModal({
                 <Input.Password
                   placeholder="填入 API Key"
                   value={apiKey}
+                  disabled={savingConfig}
                   onChange={(e) => setApiKey(e.target.value)}
                 />
               </div>
@@ -406,7 +486,23 @@ function ModelConfigModal({
           toggleCap={toggleCap}
           inferCaps={inferCaps}
         />
-      </div>
+    </div>
+  );
+}
+
+function ModelConfigModal({ open, onClose }: ModelConfigModalProps) {
+  return (
+    <Modal
+      className="model-config-modal pearl-dialog"
+      rootClassName="pearl-dialog-root"
+      title="模型配置"
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={1040}
+      styles={{ body: { padding: 0 } }}
+    >
+      <ModelSettingsPanel />
     </Modal>
   );
 }

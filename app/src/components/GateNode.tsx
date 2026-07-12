@@ -1,5 +1,5 @@
 import { memo, useMemo, useEffect, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { type NodeProps } from '@xyflow/react';
 import {
   LoadingOutlined,
   CheckCircleFilled,
@@ -13,6 +13,7 @@ import {
   type AgentRunState,
   type AgentRunStatus,
 } from '../stores/canvasStore';
+import { NodeRoutingHandles } from './CanvasArea/NodeRoutingHandles';
 
 const RUN_STATUS_TEXT = {
   idle: '未运行',
@@ -143,11 +144,7 @@ function GateNode({ id, data, selected }: NodeProps<AgentNodeType>) {
       }`}
     >
       <span className="gate-node__bar" />
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="agent-node__handle"
-      />
+      <NodeRoutingHandles />
       <div className="gate-node__main">
         {d?.collapsible && (
           <button
@@ -177,11 +174,6 @@ function GateNode({ id, data, selected }: NodeProps<AgentNodeType>) {
       {showElapsed && (
         <div className="agent-node__elapsed">已运行：{elapsedText}</div>
       )}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="agent-node__handle"
-      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { memo, useMemo, useEffect, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { type NodeProps } from '@xyflow/react';
 import {
   LoadingOutlined,
   CheckCircleFilled,
@@ -14,6 +14,7 @@ import {
   type AgentRunState,
   type AgentRunStatus,
 } from '../stores/canvasStore';
+import { NodeRoutingHandles } from './CanvasArea/NodeRoutingHandles';
 
 const RUN_STATUS_TEXT = {
   idle: '未运行',
@@ -108,11 +109,7 @@ function TimerNode({ id, data, selected }: NodeProps<AgentNodeType>) {
       }`}
     >
       <span className="timer-node__bar" />
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="agent-node__handle"
-      />
+      <NodeRoutingHandles />
       <div className="timer-node__main">
         {d?.collapsible && (
           <button
@@ -142,11 +139,6 @@ function TimerNode({ id, data, selected }: NodeProps<AgentNodeType>) {
       {runStatus === 'running' && (
         <div className="agent-node__elapsed">剩余：{countdownText}</div>
       )}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="agent-node__handle"
-      />
     </div>
   );
 }

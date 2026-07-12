@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Modal, Tag, Button, Empty, Input, Popconfirm, App, Spin } from 'antd';
 import {
   CheckCircleFilled,
@@ -16,6 +16,7 @@ import {
   type ToolMetaImplementation,
 } from '../lib/pythonClient';
 import { useToolStore } from '../stores/toolStore';
+import { startToolStatusPolling } from '../settings/toolPolling';
 
 const CAP_FOLD_THRESHOLD = 5;
 const STATUS_POLL_MS = 3000; // 轮询间隔
@@ -23,6 +24,12 @@ const STATUS_POLL_MS = 3000; // 轮询间隔
 interface Props {
   open: boolean;
   onClose: () => void;
+}
+
+export const TOOL_CONFIG_MODAL_CLASS_NAME = 'tool-config-modal pearl-dialog';
+
+export interface ToolSettingsPanelProps {
+  active: boolean;
 }
 
 function inferCustomImplementation(meta: ToolMeta): ToolMetaImplementation {
@@ -355,13 +362,12 @@ function EmptyDetail() {
   );
 }
 
-function ToolConfigModal({ open, onClose }: Props) {
+export function ToolSettingsPanel({ active }: ToolSettingsPanelProps) {
   const { message } = App.useApp();
   const [selected, setSelected] = useState<string | null>(null);
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus | 'checking'>('checking');
   const [removing, setRemoving] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const mountedRef = useRef(true);
 
   const customTools = useToolStore((s) => s.customTools);
   const syncFromService = useToolStore((s) => s.syncFromService);
@@ -370,36 +376,26 @@ function ToolConfigModal({ open, onClose }: Props) {
   const selectedBuiltin = TOOL_REGISTRY.find((t) => t.value === selected) ?? null;
   const selectedCustom = customTools.find((t) => t.name === selected) ?? null;
 
-  // 后台轮询服务状态：组件挂载后即开始，避免每次打开工具库都重新显示长时间检查态。
-  const checkStatus = useCallback(async () => {
-    const s = await getServiceStatus();
-    if (!mountedRef.current) return;
-    setServiceStatus(s);
-  }, []);
-
+  // 仅活动工具页轮询状态并同步元数据；离开页面后忽略尚未完成的请求。
   useEffect(() => {
-    mountedRef.current = true;
-    void checkStatus();
-    const timer = setInterval(() => void checkStatus(), STATUS_POLL_MS);
-    return () => {
-      mountedRef.current = false;
-      clearInterval(timer);
-    };
-  }, [checkStatus]);
+    if (!active) return;
 
-  // 打开时从服务拉取最新工具元数据（覆盖离线缓存）。
-  useEffect(() => {
-    if (!open) return;
+    let cancelled = false;
+    const disposePolling = startToolStatusPolling(async () => {
+      const nextStatus = await getServiceStatus();
+      if (!cancelled) setServiceStatus(nextStatus);
+    }, STATUS_POLL_MS);
+
     setSyncing(true);
     void syncFromService().finally(() => {
-      if (mountedRef.current) setSyncing(false);
+      if (!cancelled) setSyncing(false);
     });
-  }, [open, syncFromService]);
 
-  const handleClose = () => {
-    setSelected(null);
-    onClose();
-  };
+    return () => {
+      cancelled = true;
+      disposePolling();
+    };
+  }, [active, syncFromService]);
 
   const handleRemove = async () => {
     if (!selectedCustom) return;
@@ -415,15 +411,7 @@ function ToolConfigModal({ open, onClose }: Props) {
   };
 
   return (
-    <Modal
-      title="工具库"
-      open={open}
-      onCancel={handleClose}
-      footer={null}
-      width={900}
-      styles={{ body: { padding: 0 } }}
-      destroyOnHidden
-    >
+    <div className="tool-settings-panel">
       {/* 服务状态横幅 */}
       <ServiceBanner status={serviceStatus} />
 
@@ -435,13 +423,11 @@ function ToolConfigModal({ open, onClose }: Props) {
             {TOOL_REGISTRY.map((tool) => {
               const isReady = tool.status === 'ready';
               return (
-                <div
+                <button
+                  type="button"
                   key={tool.value}
                   className={`tc-tool-item${selected === tool.value ? ' tc-tool-item--active' : ''}`}
                   onClick={() => setSelected(tool.value)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === 'Enter' && setSelected(tool.value)}
                 >
                   <span className="tc-tool-item__icon">{tool.icon}</span>
                   <span className="tc-tool-item__name">{tool.label}</span>
@@ -451,7 +437,7 @@ function ToolConfigModal({ open, onClose }: Props) {
                   >
                     {isReady ? '已落地' : '计划中'}
                   </Tag>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -467,13 +453,11 @@ function ToolConfigModal({ open, onClose }: Props) {
               </div>
             ) : (
               customTools.map((tool) => (
-                <div
+                <button
+                  type="button"
                   key={tool.name}
                   className={`tc-tool-item${selected === tool.name ? ' tc-tool-item--active' : ''}`}
                   onClick={() => setSelected(tool.name)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === 'Enter' && setSelected(tool.name)}
                 >
                   <span className="tc-tool-item__icon">🧩</span>
                   <span className="tc-tool-item__name">{tool.name}</span>
@@ -483,7 +467,7 @@ function ToolConfigModal({ open, onClose }: Props) {
                   >
                     {tool.loadError ? '未加载' : '已注册'}
                   </Tag>
-                </div>
+                </button>
               ))
             )}
           </div>
@@ -509,6 +493,24 @@ function ToolConfigModal({ open, onClose }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToolConfigModal({ open, onClose }: Props) {
+  return (
+    <Modal
+      className={TOOL_CONFIG_MODAL_CLASS_NAME}
+      rootClassName="pearl-dialog-root"
+      title="工具库"
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={900}
+      styles={{ body: { padding: 0 } }}
+      destroyOnHidden
+    >
+      <ToolSettingsPanel active={open} />
     </Modal>
   );
 }

@@ -157,6 +157,8 @@ pub fn run() {
             storage::storage_remove,
             storage::output_dir,
             storage::open_output_dir,
+            storage::system_snapshot,
+            storage::open_system_directory,
             storage::path_exists,
             storage::open_path,
             storage::list_output_reports,

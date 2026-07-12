@@ -87,3 +87,38 @@ describe('canvas open limit', () => {
     expect(useCanvasStore.getState().runHistory).toHaveLength(1);
   });
 });
+
+describe('manual edge routes', () => {
+  it('stores an adjusted route and restores it through undo', () => {
+    useCanvasStore.setState({
+      canvases: [
+        {
+          id: 'canvas-route',
+          name: 'route canvas',
+          nodes: [],
+          edges: [{ id: 'edge-1', source: 'a', target: 'b' }],
+        },
+      ],
+      activeId: 'canvas-route',
+      history: {},
+    });
+
+    const routePoints = [
+      { x: 0, y: 0 },
+      { x: 120, y: 0 },
+      { x: 120, y: 200 },
+      { x: 300, y: 200 },
+    ];
+    useCanvasStore.getState().pushHistory('canvas-route');
+    useCanvasStore.getState().setEdgeRoute('canvas-route', 'edge-1', routePoints);
+
+    expect(
+      useCanvasStore.getState().canvases[0].edges[0].data?.routePoints,
+    ).toEqual(routePoints);
+
+    useCanvasStore.getState().undo('canvas-route');
+    expect(
+      useCanvasStore.getState().canvases[0].edges[0].data?.routePoints,
+    ).toBeUndefined();
+  });
+});

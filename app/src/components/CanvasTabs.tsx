@@ -148,7 +148,7 @@ function CanvasTabs() {
         cancelText="取消"
         destroyOnHidden
       >
-        <p style={{ color: '#86909c', marginBottom: 8 }}>
+        <p className="pearl-modal-copy pearl-modal-copy--compact">
           该画布尚未保存,请先命名(不能直接使用默认名)。
         </p>
         <Input

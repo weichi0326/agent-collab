@@ -11,11 +11,12 @@ body,
 }
 
 body {
-  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui,
-    sans-serif;
-  background: #f5f6f8;
-  color: #1f2329;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', system-ui, sans-serif;
+  background: var(--pearl-bg, #f3f5f3);
+  color: var(--pearl-text, #303734);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 #root {

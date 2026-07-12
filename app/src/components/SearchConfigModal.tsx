@@ -23,7 +23,7 @@ interface Props {
   onClose: () => void;
 }
 
-function SearchConfigModal({ open, onClose }: Props) {
+export function SearchSettingsPanel() {
   const configs = useSearchStore((s) => s.configs);
   const order = useSearchStore((s) => s.order);
   const setKey = useSearchStore((s) => s.setKey);
@@ -56,17 +56,7 @@ function SearchConfigModal({ open, onClose }: Props) {
   };
 
   return (
-    <Modal
-      title="联网搜索配置"
-      open={open}
-      onCancel={onClose}
-      footer={[
-        <Button key="done" type="primary" onClick={onClose}>
-          完成
-        </Button>,
-      ]}
-      destroyOnHidden
-    >
+    <>
       <Paragraph type="secondary" style={{ marginBottom: 16 }}>
         可配置多家搜索厂商并排优先级：发送时从最上面一家开始用，某家失败或额度用尽会自动切换到下一家。
         开启输入框的「联网搜索」开关后，发送前会先检索资料，再连同参考来源交给模型作答。
@@ -153,6 +143,26 @@ function SearchConfigModal({ open, onClose }: Props) {
           );
         })}
       </div>
+    </>
+  );
+}
+
+function SearchConfigModal({ open, onClose }: Props) {
+  return (
+    <Modal
+      className="search-config-modal pearl-dialog"
+      rootClassName="pearl-dialog-root"
+      title="联网搜索配置"
+      open={open}
+      onCancel={onClose}
+      footer={[
+        <Button key="done" type="primary" onClick={onClose}>
+          完成
+        </Button>,
+      ]}
+      destroyOnHidden
+    >
+      <SearchSettingsPanel />
     </Modal>
   );
 }
