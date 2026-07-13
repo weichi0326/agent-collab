@@ -21,7 +21,6 @@ import {
 } from '@ant-design/icons';
 import { useUiStore } from '../stores/uiStore';
 import {
-  outputFolderName,
   useCanvasStore,
   upstreamNames,
   type AgentNodeData,
@@ -144,12 +143,6 @@ function PropertiesPanel() {
   const historyPaths = Array.isArray(d.dataSourceHistoryPaths)
     ? d.dataSourceHistoryPaths
     : [];
-  const canvasName = canvas?.name ?? '画布';
-  const nodeName = typeof d.label === 'string' && d.label ? d.label : 'Agent';
-  const outputFolderPreview = outputFolderName(canvasName, nodeName).replace(
-    /_\d{14}\//,
-    '_运行时间/',
-  );
   const outputFolderPath = d.lastOutput?.items.find((item) => item.path)?.path
     ?.replace(/[\\/][^\\/]+$/, '');
   // 只读快照 tab:仅可查看节点配置,所有编辑控件禁用
@@ -862,10 +855,6 @@ function PropertiesPanel() {
                 >
                   {outputFolderPath ? '打开节点产物目录' : '打开总输出目录'}
                 </Button>
-              </div>
-              <div className="node-hint">产物保存到项目 outputs 目录，按 月份 / 日期 / 画布运行 / 节点产物 分级</div>
-              <div className="node-folder-preview">
-                {outputFolderPath ?? outputFolderPreview}
               </div>
             </div>
 
