@@ -49,6 +49,7 @@ import {
   routeEdgesForNodes,
   validateConnection,
 } from './CanvasArea/edgeRouting';
+import { straightenConnectedNodes } from './CanvasArea/edgeStraighten';
 import { EditableOrthogonalEdge } from './CanvasArea/EditableOrthogonalEdge';
 import { AlignmentGuides } from './CanvasArea/AlignmentGuides';
 import {
@@ -189,9 +190,17 @@ function Flow() {
     [activeId, pushHistory],
   );
   const onNodeDragStop = useCallback(() => {
+    // 拖拽收尾:相连边中心几像素错位则拉直(移下方/右侧节点),共用拖拽起始的撤销快照
+    const moves = straightenConnectedNodes({
+      draggedId: activeDragNodeId.current,
+      nodes: displayNodes,
+      edges: canvas?.edges ?? [],
+      threshold: 8,
+    });
+    if (moves.length > 0) applyNodes(activeId, moves);
     activeDragNodeId.current = null;
     setAlignmentGuides([]);
-  }, []);
+  }, [activeId, applyNodes, displayNodes, canvas?.edges]);
 
   useEffect(() => {
     activeDragNodeId.current = null;
