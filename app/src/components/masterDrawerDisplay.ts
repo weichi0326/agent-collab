@@ -2,10 +2,13 @@ import type { AppView } from '../stores/uiStore';
 
 export function masterDrawerClassName(
   _expanded: boolean,
-  _fullscreen: boolean,
+  fullscreen: boolean,
   _fullscreenClosing = false,
 ): string {
-  return 'master-drawer master-agent-drawer--pearl master-agent-drawer--half';
+  const displayClass = fullscreen
+    ? 'master-agent-drawer--fullscreen'
+    : 'master-agent-drawer--half';
+  return `master-drawer master-agent-drawer--pearl ${displayClass}`;
 }
 
 export function masterDrawerContentClassName(

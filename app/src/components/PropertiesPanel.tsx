@@ -333,7 +333,11 @@ function PropertiesPanel() {
     const gateType: 'or' | 'and' | 'nor' =
       d.gateType === 'and' || d.gateType === 'nor' ? d.gateType : 'or';
     return (
-      <div className="right-panel" style={{ width: rightWidth }}>
+      <div
+        className="right-panel"
+        data-onboarding="properties-panel"
+        style={{ width: rightWidth }}
+      >
         <ResizeHandle side="right" />
         <div className="workspace-panel-header">
           <Segmented
@@ -396,7 +400,11 @@ function PropertiesPanel() {
       patch({ timerSeconds: next, label: `定时 ${formatTimerLabel(next)}` });
     };
     return (
-      <div className="right-panel" style={{ width: rightWidth }}>
+      <div
+        className="right-panel"
+        data-onboarding="properties-panel"
+        style={{ width: rightWidth }}
+      >
         <ResizeHandle side="right" />
         <div className="workspace-panel-header">
           <Segmented
@@ -470,7 +478,11 @@ function PropertiesPanel() {
   }
 
   return (
-    <div className="right-panel" style={{ width: rightWidth }}>
+    <div
+      className="right-panel"
+      data-onboarding="properties-panel"
+      style={{ width: rightWidth }}
+    >
       <ResizeHandle side="right" />
       <div className="workspace-panel-header">
         <Segmented

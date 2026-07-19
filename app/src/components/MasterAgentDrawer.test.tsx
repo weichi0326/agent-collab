@@ -63,21 +63,24 @@ describe('MasterAgentDrawer display mode', () => {
     expect(html).not.toContain('姬子显示模式');
   });
 
-  it('keeps the drawer root in normal flow for every display state', () => {
+  it('keeps the drawer root in flow and removes side gutters in fullscreen mode', () => {
     expect(masterDrawerClassName(true, false)).toBe(
       'master-drawer master-agent-drawer--pearl master-agent-drawer--half',
     );
     expect(masterDrawerClassName(false, true)).toBe(
-      'master-drawer master-agent-drawer--pearl master-agent-drawer--half',
+      'master-drawer master-agent-drawer--pearl master-agent-drawer--fullscreen',
     );
     expect(masterDrawerClassName(true, true)).toBe(
-      'master-drawer master-agent-drawer--pearl master-agent-drawer--half',
+      'master-drawer master-agent-drawer--pearl master-agent-drawer--fullscreen',
+    );
+    expect(styles).toMatch(
+      /\.master-agent-drawer--fullscreen\s*\{[^}]*margin:\s*0;[^}]*border-radius:\s*0;/s,
     );
   });
 
   it('applies fullscreen positioning only to the content overlay', () => {
     expect(masterDrawerClassName(false, true, true)).toBe(
-      'master-drawer master-agent-drawer--pearl master-agent-drawer--half',
+      'master-drawer master-agent-drawer--pearl master-agent-drawer--fullscreen',
     );
     expect(masterDrawerContentClassName(true, true, false)).toBe(
       'master-drawer__content master-drawer__content--open master-drawer__content--fullscreen',

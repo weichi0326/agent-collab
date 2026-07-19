@@ -341,7 +341,7 @@ export function ModelSettingsPanel({
   return (
     <div className="mc">
         {/* 左栏:厂商选择 + 表单 + 已配置实例 */}
-        <div className="mc__left">
+        <div className="mc__left" data-onboarding="model-provider-list">
           <Input
             allowClear
             placeholder="搜索厂商或模型"
@@ -425,7 +425,11 @@ export function ModelSettingsPanel({
           </div>
 
           {formActive && (
-            <div className="mc__form">
+            <div
+              className="mc__form"
+              data-onboarding="model-credentials"
+              data-onboarding-config-id={selectedConfigId}
+            >
               <div className="mc__form-title">
                 {adding ? '新增配置' : '编辑配置'}
               </div>

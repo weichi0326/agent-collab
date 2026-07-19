@@ -97,7 +97,10 @@ async function extractRuntime(tarPath) {
     log('解压运行时…');
     // Windows 10+ 自带 tar.exe，支持 .tar.gz。
     // --force-local：否则含盘符冒号的路径（C:\…）会被误当成 host:path 远程规格。
-    execFileSync('tar', ['--force-local', '-xzf', tarPath, '-C', tmp], { stdio: 'inherit' });
+    const tarArgs = process.platform === 'win32'
+      ? ['-xzf', tarPath, '-C', tmp]
+      : ['--force-local', '-xzf', tarPath, '-C', tmp];
+    execFileSync('tar', tarArgs, { stdio: 'inherit' });
     const inner = path.join(tmp, 'python');
     if (!(await exists(inner))) {
       throw new Error(`解压结构异常：未找到 ${inner}`);
@@ -146,6 +149,9 @@ async function copyAppCode() {
   log('拷贝 app 代码（app.py + tools/ + requirements.txt）…');
   await fs.copyFile(path.join(PYTHON_SRC, 'app.py'), path.join(DIST, 'app.py'));
   await fs.copyFile(REQUIREMENTS, path.join(DIST, 'requirements.txt'));
+  for (const module of ['web_reader.py', 'web_reader_policy.py']) {
+    await fs.copyFile(path.join(PYTHON_SRC, module), path.join(DIST, module));
+  }
 
   // 同步时先清理旧源码，避免历史构建目录里残留用户模块或 registry 被误打进安装包。
   await fs.rm(path.join(DIST, 'tools'), { recursive: true, force: true });

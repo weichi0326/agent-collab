@@ -16,6 +16,7 @@ import JiziCommandCenter from './components/JiziCommandCenter';
 import SettingsCenter, {
   LiveAnnouncement,
 } from './components/SettingsCenter/SettingsCenter';
+import OnboardingController from './components/Onboarding/OnboardingController';
 import { useCanvasStore } from './stores/canvasStore';
 import { useAgentStore } from './stores/agentStore';
 import { useModelStore } from './stores/modelStore';
@@ -26,6 +27,7 @@ import { useToolStore } from './stores/toolStore';
 import { useTokenStatsStore } from './stores/tokenStatsStore';
 import { useOrchestratorStore } from './stores/orchestratorStore';
 import { useJiziSkillSettingsStore } from './stores/jiziSkillStore';
+import { useOnboardingStore } from './onboarding/onboardingStore';
 import { appViewLabel, workspaceLayerState } from './settings/appView';
 import './App.css';
 
@@ -42,6 +44,7 @@ const PERSISTED = [
   useTokenStatsStore,
   useOrchestratorStore,
   useJiziSkillSettingsStore,
+  useOnboardingStore,
 ];
 
 const HYDRATION_TIMEOUT_MS = 8000;
@@ -215,6 +218,7 @@ function App() {
       )}
       <AgentConfigModal />
       {view === 'workspace' && <CommandPalette />}
+      <OnboardingController />
     </div>
   );
 }

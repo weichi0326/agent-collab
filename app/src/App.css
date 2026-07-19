@@ -5901,6 +5901,11 @@ body.resizing * {
   border-radius: 0 0 var(--radius-panel) var(--radius-panel);
 }
 
+.master-agent-drawer--fullscreen {
+  margin: 0;
+  border-radius: 0;
+}
+
 .master-drawer__content {
   border-bottom-color: var(--pearl-border);
   transition: height var(--motion-page) var(--motion-ease-out);

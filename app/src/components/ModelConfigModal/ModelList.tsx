@@ -63,7 +63,11 @@ export function ModelList({
   inferCaps,
 }: ModelListProps) {
   return (
-    <div className="mc__right">
+    <div
+      className="mc__right"
+      data-onboarding="model-list"
+      data-onboarding-config-id={selectedConfig?.id}
+    >
       <div className="mc__section-title">已添加的模型名称</div>
       <div className="mc__models-note">
         姬子会根据模型名称先自动识别长上下文、看图、音频能力；识别不准时可以手动点亮或关闭。
@@ -87,6 +91,7 @@ export function ModelList({
 
           <div className="mc__actions">
             <Button
+              data-onboarding="model-test"
               size="small"
               icon={<ThunderboltOutlined />}
               loading={selectedConfig.test.status === 'testing'}

@@ -20,6 +20,7 @@ import { mergeToolTags } from '../../lib/toolRegistry';
 import { fileToText } from '../../lib/textFile';
 import { countAgentRefs } from './agentRefs';
 import { exportAgentToFile, parseAgentImport } from '../../lib/agentTransfer';
+import { useOnboardingStore } from '../../onboarding/onboardingStore';
 
 export function AgentLibrary() {
   const { message, modal } = App.useApp();
@@ -30,6 +31,7 @@ export function AgentLibrary() {
   const reorderAgent = useAgentStore((s) => s.reorderAgent);
   const openNew = useAgentEditorStore((s) => s.openNew);
   const openEdit = useAgentEditorStore((s) => s.openEdit);
+  const tutorialAgentIds = useOnboardingStore((s) => s.tutorialAgentIds);
 
   const [query, setQuery] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -164,6 +166,14 @@ export function AgentLibrary() {
           filtered.map((a) => (
             <div
               key={a.id}
+              data-agent-id={a.id}
+              data-onboarding={
+                a.id === tutorialAgentIds?.[0]
+                  ? 'tutorial-agent-first'
+                  : a.id === tutorialAgentIds?.[1]
+                    ? 'tutorial-agent-second'
+                    : undefined
+              }
               className={`agent-card${draggingId === a.id ? ' agent-card--dragging' : ''}`}
               draggable
               onDragStart={(e) => {

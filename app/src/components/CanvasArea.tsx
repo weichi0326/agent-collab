@@ -426,7 +426,10 @@ function CanvasArea() {
 
   if (!hasActive) {
     return (
-      <div className="canvas-area canvas-area--empty">
+      <div
+        className="canvas-area canvas-area--empty"
+        data-onboarding="canvas-surface"
+      >
         <div className="canvas-empty">
           <PartitionOutlined className="canvas-empty__icon" />
           <div className="canvas-empty__text">当前没有打开的画布</div>
@@ -445,7 +448,7 @@ function CanvasArea() {
   }
 
   return (
-    <div className="canvas-area">
+    <div className="canvas-area" data-onboarding="canvas-surface">
       <ReactFlowProvider key={activeId}>
         <Flow />
       </ReactFlowProvider>

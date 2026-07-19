@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "useLocalToolsDir": true,
     "publisher": "multi-agent-tool",
     "copyright": "Copyright © 2026 multi-agent-tool",
     "licenseFile": "license.txt",

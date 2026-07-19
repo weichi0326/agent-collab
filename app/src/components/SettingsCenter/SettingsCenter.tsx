@@ -118,6 +118,17 @@ export function SettingsCenterNavigation({
                 <button
                   key={item.id}
                   type="button"
+                  data-onboarding={
+                    item.id === 'models'
+                      ? 'settings-models'
+                      : item.id === 'search'
+                        ? 'settings-search'
+                        : item.id === 'tools'
+                          ? 'settings-tools'
+                          : item.id === 'jizi'
+                            ? 'settings-jizi'
+                            : undefined
+                  }
                   className={`settings-nav__item${
                     item.id === section ? ' settings-nav__item--active' : ''
                   }`}

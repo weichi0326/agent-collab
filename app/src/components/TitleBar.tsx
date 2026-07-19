@@ -9,6 +9,7 @@ import {
   FolderOpenOutlined,
   ArrowLeftOutlined,
   SettingOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import {
   useCanvasStore,
@@ -31,6 +32,8 @@ import { useAbortedRunStore } from '../stores/abortedRunStore';
 import { useUiStore, type AppView } from '../stores/uiStore';
 import { appViewLabel } from '../settings/appView';
 import { requiresSettingsLeaveConfirmation } from '../settings/settingsNavigation';
+import { useOnboardingStore } from '../onboarding/onboardingStore';
+import { removeTutorialResources } from '../onboarding/onboardingTutorial';
 
 interface TitleBarProps {
   view: AppView;
@@ -147,6 +150,17 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
   const abortRef = useRef<AbortController | null>(null);
   const settingsDirty = useUiStore((state) => state.settingsDirty);
   const setSettingsDirty = useUiStore((state) => state.setSettingsDirty);
+
+  const restartOnboarding = () => {
+    const onboarding = useOnboardingStore.getState();
+    if (onboarding.tutorialCanvasId && onboarding.tutorialAgentIds) {
+      removeTutorialResources({
+        canvasId: onboarding.tutorialCanvasId,
+        agentIds: onboarding.tutorialAgentIds,
+      });
+    }
+    onboarding.restart('welcome');
+  };
 
   useEffect(() => {
     restoreSettingsButtonFocus(
@@ -398,6 +412,14 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
         {appViewLabel(view)}
       </span>
       <div className="title-bar__spacer" />
+      <Button
+        className="title-bar__compact-action"
+        size="small"
+        icon={<QuestionCircleOutlined />}
+        onClick={restartOnboarding}
+      >
+        新手引导
+      </Button>
       {view === 'workspace' ? (
         <Space>
           <PrimaryViewActions
@@ -424,6 +446,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
         </Button>
         <Button
           className="title-bar__compact-action"
+          data-onboarding="canvas-save"
           aria-label="保存"
           size="small"
           icon={<SaveOutlined />}
@@ -444,6 +467,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
         </Button>
         <Button
           className="title-bar__compact-action"
+          data-onboarding="canvas-run"
           aria-label={running ? '中止任务' : '运行'}
           size="small"
           type="primary"

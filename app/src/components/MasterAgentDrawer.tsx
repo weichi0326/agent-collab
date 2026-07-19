@@ -83,6 +83,7 @@ function MasterAgentDrawer() {
     <div className={masterDrawerClassName(expanded, fullscreen, fullscreenClosing)}>
       <div className="master-drawer__bar">
         <button
+          data-onboarding="jizi-entry"
           type="button"
           className="master-drawer__trigger"
           onClick={toggleExpanded}
@@ -97,6 +98,7 @@ function MasterAgentDrawer() {
         </button>
       </div>
       <div
+        data-onboarding="jizi-panel"
         className={masterDrawerContentClassName(
           expanded,
           fullscreen,
