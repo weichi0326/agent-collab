@@ -20,6 +20,7 @@ export default function ServiceStatusDot({ className = '' }: { className?: strin
   useEffect(() => {
     let alive = true;
     const check = async () => {
+      if (document.hidden) return;
       const next = await getServiceStatus();
       if (alive) setStatus(next);
     };

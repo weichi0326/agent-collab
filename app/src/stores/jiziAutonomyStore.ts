@@ -70,13 +70,21 @@ export const useJiziAutonomyStore = create<JiziAutonomyState>((set, get) => ({
         count: run.steps.length,
         evidence: `事务已执行 ${run.steps.length} 个步骤。`,
       });
-      observation = await observeJiziProject();
-      const checks = run.steps.map((step) => verifyPlanStep(step, observation!));
-      get().dispatch(sessionId, {
-        type: 'verified',
-        ok: checks.every((check) => check.ok),
-        evidence: checks.map((check) => check.evidence).join('；'),
-      });
+      try {
+        observation = await observeJiziProject();
+        const checks = run.steps.map((step) => verifyPlanStep(step, observation!));
+        get().dispatch(sessionId, {
+          type: 'verified',
+          ok: checks.every((check) => check.ok),
+          evidence: checks.map((check) => check.evidence).join('；'),
+        });
+      } catch (verifyError) {
+        get().dispatch(sessionId, {
+          type: 'verified',
+          ok: false,
+          evidence: verifyError instanceof Error ? verifyError.message : '验证失败',
+        });
+      }
     }
     if (get().runs[sessionId]?.task.status !== 'replanning') return;
     try {

@@ -1,4 +1,5 @@
-﻿import type { SearchResult } from './searchClient';
+﻿import { asObject } from './jsonGuards';
+import type { SearchResult } from './searchClient';
 import { chat, type LLMConfig } from './llmClient';
 import { cleanJsonFence } from './masterPlanner';
 
@@ -6,12 +7,6 @@ export interface SearchQualityReport {
   kept: SearchResult[];
   summary: string;
   droppedCount: number;
-}
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function fallbackQualityReport(results: SearchResult[]): SearchQualityReport {

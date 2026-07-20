@@ -739,8 +739,8 @@ function MasterAgentPanel() {
           });
           return;
         }
-      } catch {
-        // 总规划器是体验增强;失败时继续普通对话，不用本地关键词兜底。
+      } catch (err) {
+        console.warn('[planJiziTurnWithLLM]', err);
       }
     }
 

@@ -185,6 +185,7 @@ export default function JiziCommandCenter() {
   };
 
   const refreshService = useCallback(async () => {
+    if (document.hidden) return;
     try {
       setServiceStatus(await getServiceStatus());
     } catch {

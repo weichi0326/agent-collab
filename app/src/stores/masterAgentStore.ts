@@ -85,6 +85,7 @@ const DEFAULT_TITLE = '新对话';
 
 // 4.2：单会话消息上限,达到后自动开启延续会话(继承上下文摘要),避免单会话无限膨胀
 export const SESSION_MESSAGE_CAP = 100;
+const MEMORY_RECORD_CAP = 200;
 
 // 姬子诊断专用固定会话:所有节点失败诊断/修复日志与确认卡都落这里,与用户正常对话隔离
 // (不污染用户会话的 LLM 上下文)。固定 id、不可删除/改名、置顶展示、只读输入、只保留最近 100 条。
@@ -372,8 +373,8 @@ export const useMasterAgentStore = create<MasterAgentState>()(
         set((s) => {
           if (id === DIAGNOSIS_SESSION_ID) return s; // 诊断会话不可删除
           const sessions = s.sessions.filter((x) => x.id !== id);
-          const activeId =
-            s.activeId === id ? (sessions[0]?.id ?? null) : s.activeId;
+          const fallback = sessions.find((x) => x.id !== DIAGNOSIS_SESSION_ID);
+          const activeId = s.activeId === id ? (fallback?.id ?? null) : s.activeId;
           return { sessions, activeId };
         }),
 
@@ -575,7 +576,7 @@ export const useMasterAgentStore = create<MasterAgentState>()(
                       scope: 'global',
                       status: 'active',
                     },
-                  ],
+                  ].slice(-MEMORY_RECORD_CAP),
           };
         });
       },
@@ -604,6 +605,7 @@ export const useMasterAgentStore = create<MasterAgentState>()(
             preferences: organizeMemoryList(s.memory.preferences),
             resources: organizeMemoryList(s.memory.resources),
           },
+          memoryRecords: s.memoryRecords.slice(-MEMORY_RECORD_CAP),
         })),
 
       applySystemPrompt: (text, sourceName) => {

@@ -1,15 +1,10 @@
+import { asObject } from './jsonGuards';
 import { chat, type ChatTurn, type LLMConfig } from './llmClient';
 import { cleanJsonFence } from './masterPlanner';
 
 export type JiziSearchDecision =
   | { shouldSearch: true; query: string; reason: string }
   | { shouldSearch: false; reason: string };
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
 
 function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

@@ -1,4 +1,5 @@
-﻿import { chat, type LLMConfig } from './llmClient';
+﻿import { asObject } from './jsonGuards';
+import { chat, type LLMConfig } from './llmClient';
 import { cleanJsonFence } from './masterPlanner';
 import { buildJiziSkillSystemBlock } from './jiziSkills';
 import type { MasterAction } from './masterActions';
@@ -12,12 +13,6 @@ const NAME_RE = /^[a-z][a-z0-9-]{1,39}$/;
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((v) => String(v).trim()).filter(Boolean);
-}
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function asPlainParams(value: unknown): Record<string, unknown> {

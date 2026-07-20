@@ -88,6 +88,43 @@ describe('canvas open limit', () => {
   });
 });
 
+describe('saved canvas deletion', () => {
+  it('deletes the saved record without closing a running open tab', () => {
+    const saved: SavedCanvas = {
+      id: 'saved-running',
+      name: '运行中画布',
+      nodes: [],
+      edges: [],
+      savedAt: '2026-07-20 00:00:00',
+    };
+    useCanvasStore.setState({
+      canvases: [
+        {
+          id: 'canvas-running',
+          name: '运行中画布',
+          nodes: [],
+          edges: [],
+          savedId: saved.id,
+          lockClose: true,
+          runState: { status: 'running', startedAt: 1 },
+        },
+      ],
+      activeId: 'canvas-running',
+      savedCanvases: [saved],
+      history: {},
+    });
+
+    useCanvasStore.getState().deleteSaved(saved.id);
+
+    const state = useCanvasStore.getState();
+    expect(state.savedCanvases).toHaveLength(0);
+    expect(state.canvases).toHaveLength(1);
+    expect(state.canvases[0].savedId).toBeUndefined();
+    expect(state.canvases[0].runState?.status).toBe('running');
+    expect(state.activeId).toBe('canvas-running');
+  });
+});
+
 describe('manual edge routes', () => {
   it('stores an adjusted route and restores it through undo', () => {
     useCanvasStore.setState({

@@ -125,7 +125,7 @@ function App() {
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
-    });
+    }).catch((err) => console.warn('[tauri listen]', err));
     return () => {
       cancelled = true;
       unlisten?.();

@@ -126,6 +126,7 @@ export function ImportSkillModal({
     setStage('idle');
     setRows([]);
     setAnalysisProgress('正在读取文件...');
+    analysisController.current?.abort();
     const controller = new AbortController();
     analysisController.current = controller;
     try {

@@ -1,5 +1,5 @@
 // 工具注册表：工具元数据的唯一来源。
-// agentStore.ts 中的 TOOL_TAGS 从这里派生最小 { value, label } 供 Select 使用。
+// BUILTIN_TOOL_TAGS 从这里派生最小 { value, label } 供 Select 使用。
 
 export type ToolStatus = 'planned' | 'ready';
 
@@ -9,7 +9,7 @@ export interface ToolCapability {
 }
 
 export interface ToolDef {
-  value: string;           // 与 TOOL_TAGS.value 完全一致
+  value: string;           // 与工具标签 value 完全一致
   label: string;           // 展示名
   icon: string;            // emoji 图标
   status: ToolStatus;      // planned = 计划中；ready = 已落地

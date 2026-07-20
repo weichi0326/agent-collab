@@ -1,3 +1,4 @@
+import { asObject } from './jsonGuards';
 import { cleanJsonFence } from './masterPlanner';
 
 export interface UserChoiceOption {
@@ -19,17 +20,11 @@ export type JiziIntentDecision =
   | { kind: 'system-check'; reason: string }
   | { kind: 'chat'; reason: string };
 
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function normalizeChoiceOptions(value: unknown): UserChoiceOption[] {
+export function normalizeChoiceOptions(value: unknown): UserChoiceOption[] {
   const rawOptions = Array.isArray(value) ? value : [];
   const options = rawOptions
     .map((item, index): UserChoiceOption | null => {

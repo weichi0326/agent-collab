@@ -1,5 +1,6 @@
 import { isTauri, invoke } from '@tauri-apps/api/core';
 import { chat, type LLMConfig } from './llmClient';
+import { asObject } from './jsonGuards';
 import { enabledJiziSkillIds } from '../stores/jiziSkillStore';
 import { useJiziSkillUsageStore } from '../stores/jiziSkillUsageStore';
 import { cleanJsonFence } from './masterPlanner';
@@ -309,12 +310,6 @@ function buildSelectionPrompt(userText: string, skills: JiziSkill[]): string {
     '【用户请求】',
     userText,
   ].join('\n');
-}
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 export function parseSkillSelectionReply(

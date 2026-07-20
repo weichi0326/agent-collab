@@ -1,6 +1,7 @@
 import { chat, type ChatTurn, type LLMConfig } from './llmClient';
+import { asObject } from './jsonGuards';
 import { cleanJsonFence } from './masterPlanner';
-import { textValue as sharedTextValue } from './agentRunner/utils';
+import { textValue } from './agentRunner/utils';
 import type { AgentOutputFormat } from '../stores/canvasStore';
 import type {
   MasterAction,
@@ -8,7 +9,7 @@ import type {
   MasterPlanStep,
 } from './masterActions';
 import type { JiziSearchDecision } from './jiziSearchPlanner';
-import type { UserChoiceOption } from './jiziIntentPlanner';
+import { normalizeChoiceOptions, type UserChoiceOption } from './jiziIntentPlanner';
 
 export type JiziTurnDecision =
   | {
@@ -43,18 +44,8 @@ export interface JiziTurnPlannerOptions {
   signal?: AbortSignal;
 }
 
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function textValue(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
 function optionalTextValue(value: unknown): string | undefined {
-  return sharedTextValue(value) || undefined;
+  return textValue(value) || undefined;
 }
 
 function noSearch(reason = ''): JiziSearchDecision {
@@ -187,33 +178,6 @@ function normalizeStep(value: unknown): MasterPlanStep | null {
     return { type };
   }
   return null;
-}
-
-function normalizeChoiceOptions(value: unknown): UserChoiceOption[] {
-  const rawOptions = Array.isArray(value) ? value : [];
-  const options = rawOptions
-    .map((item, index): UserChoiceOption | null => {
-      const obj = asObject(item);
-      if (!obj) return null;
-      const title = textValue(obj.title);
-      const description = textValue(obj.description);
-      if (!title || !description) return null;
-      return {
-        id: textValue(obj.id) || `option-${index + 1}`,
-        title,
-        description,
-        recommended: obj.recommended === true,
-      };
-    })
-    .filter((item): item is UserChoiceOption => !!item)
-    .slice(0, 4);
-
-  if (options.length > 0 && !options.some((option) => option.recommended)) {
-    options[0] = { ...options[0], recommended: true };
-  }
-  return options.sort(
-    (a, b) => Number(!!b.recommended) - Number(!!a.recommended),
-  );
 }
 
 export function parseJiziTurnDecision(

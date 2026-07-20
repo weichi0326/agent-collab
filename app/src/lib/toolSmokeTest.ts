@@ -1,4 +1,5 @@
-﻿import { executeTool, type ToolResult } from './pythonClient';
+﻿import { asObject } from './jsonGuards';
+import { executeTool, type ToolResult } from './pythonClient';
 import { chat, type LLMConfig } from './llmClient';
 import { cleanJsonFence } from './masterPlanner';
 import type { MasterAction } from './masterActions/types';
@@ -8,12 +9,6 @@ export interface ToolSmokeTestOutcome {
   params: Record<string, unknown>;
   result?: unknown;
   error?: string;
-}
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function safeSmokeParams(value: unknown): Record<string, unknown> {

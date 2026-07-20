@@ -165,6 +165,7 @@ export const useOrchestratorStore = create<OrchestratorState>()(
 
       const diagnose = async (incident: Incident) => {
         const master = useMasterAgentStore.getState();
+        const incidentAlive = () => get().incidents.some((item) => item.id === incident.id);
 
         const masterModel = useUiStore.getState().masterModel;
         const cfg = masterModel
@@ -198,10 +199,12 @@ export const useOrchestratorStore = create<OrchestratorState>()(
             text: prompt.text,
             scene: 'orchestrate',
           });
+          if (!incidentAlive()) return;
           diagnosis = parseFailureDiagnosis(reply);
         } catch {
           diagnosis = unknownFailureDiagnosis();
         }
+        if (!incidentAlive()) return;
 
         const {
           category,
@@ -247,6 +250,7 @@ export const useOrchestratorStore = create<OrchestratorState>()(
             `${capability || incident.nodeLabel} python library site:pypi.org`;
           try {
             const outcome = await searchWithFailover(entries, query, 5);
+            if (!incidentAlive()) return;
             candidatesText = outcome.results
               .slice(0, 5)
               .map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\n${r.link}`)
@@ -270,6 +274,7 @@ export const useOrchestratorStore = create<OrchestratorState>()(
             .filter(Boolean)
             .join('\n');
           toolAction = await generateToolWithLLM(requirement, llmCfg, modelId);
+          if (!incidentAlive()) return;
         } catch (err) {
           const detail = errorMessage(err);
           finishFailed(
@@ -572,15 +577,16 @@ export const useOrchestratorStore = create<OrchestratorState>()(
         autoGrantedToolCount: s.autoGrantedToolCount,
         installedToolCount: s.installedToolCount,
       }),
-      // 旧持久化数据无计数字段时兜底为 0。
-      merge: (persisted, current) => ({
-        ...current,
-        ...(persisted as Partial<OrchestratorState>),
-        autoGrantedToolCount:
-          (persisted as Partial<OrchestratorState>)?.autoGrantedToolCount ?? 0,
-        installedToolCount:
-          (persisted as Partial<OrchestratorState>)?.installedToolCount ?? 0,
-      }),
+      // 只合并 partialize 写入的字段,incidents 等瞬态字段永远保留 current 默认值。
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<OrchestratorState> | undefined;
+        return {
+          ...current,
+          enabled: saved?.enabled ?? current.enabled,
+          autoGrantedToolCount: saved?.autoGrantedToolCount ?? 0,
+          installedToolCount: saved?.installedToolCount ?? 0,
+        };
+      },
     },
   ),
 );

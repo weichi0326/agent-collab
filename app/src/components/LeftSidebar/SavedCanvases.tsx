@@ -62,7 +62,7 @@ export function SavedCanvases() {
     const wasOpen = canvases.some((c) => c.savedId === id);
     deleteSaved(id);
     if (wasOpen) {
-      message.warning(`画布「${name}」已删除,已关闭对应标签`);
+      message.warning(`画布「${name}」已删除，运行中的标签会保留为未保存画布`);
     } else {
       message.success(`画布「${name}」已删除`);
     }

@@ -830,7 +830,11 @@ pub fn list_jizi_skill_files() -> Result<Vec<JiziSkillFile>, String> {
             continue;
         }
 
-        let content = fs::read_to_string(&skill_path).map_err(|e| e.to_string())?;
+        let bytes = match fs::read(&skill_path) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let content = String::from_utf8_lossy(&bytes).into_owned();
         skills.push(JiziSkillFile {
             id: id.to_string(),
             path: path_to_string(&skill_path)?,
@@ -890,6 +894,7 @@ pub fn overwrite_jizi_skill_file(
 ) -> Result<(), String> {
     let (skill_path, content, _id_label) =
         build_jizi_skill_artifacts(id, title, description, category, capabilities, instructions)?;
+    backup_existing_skill_file(&skill_path)?;
     atomic_write(&skill_path, &content)?;
     Ok(())
 }
@@ -938,6 +943,14 @@ pub fn write_jizi_skill_files(items: Vec<JiziSkillWriteInput>) -> Result<(), Str
     write_prepared_skill_transaction(&prepared)
 }
 
+fn backup_existing_skill_file(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        let backup_path = path.with_extension("md.bak");
+        fs::copy(path, backup_path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn write_prepared_skill_transaction(prepared: &[(PathBuf, String)]) -> Result<(), String> {
     let snapshots = prepared
         .iter()
@@ -951,6 +964,10 @@ fn write_prepared_skill_transaction(prepared: &[(PathBuf, String)]) -> Result<()
             }
         })
         .collect::<Result<Vec<_>, String>>()?;
+
+    for (path, _) in prepared.iter() {
+        backup_existing_skill_file(path)?;
+    }
 
     for (index, (path, content)) in prepared.iter().enumerate() {
         if let Err(error) = atomic_write(path, content) {

@@ -668,6 +668,14 @@ export const useCanvasStore = create<CanvasState>()(
           const savedCanvases = s.savedCanvases.filter((x) => x.id !== savedId);
           const openTab = s.canvases.find((c) => c.savedId === savedId);
           if (!openTab) return { savedCanvases };
+          if (openTab.lockClose || openTab.runState?.status === 'running') {
+            return {
+              savedCanvases,
+              canvases: s.canvases.map((c) =>
+                c.id === openTab.id ? { ...c, savedId: undefined } : c,
+              ),
+            };
+          }
           const idx = s.canvases.findIndex((c) => c.id === openTab.id);
           const list = s.canvases.filter((c) => c.id !== openTab.id);
           let activeId = s.activeId;

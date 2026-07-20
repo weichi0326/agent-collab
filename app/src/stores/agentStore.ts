@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { uid } from '../lib/id';
 import { createProjectStorage } from '../lib/tauriStorage';
-import { BUILTIN_TOOL_TAGS } from '../lib/toolRegistry';
 import { normalizeToolTags } from '../lib/toolTagMigration';
 
 // Agent 定义:画布节点只引用其 id(见开发清单 7.2),LLM 只存引用不含密钥。
@@ -11,7 +10,7 @@ export interface AgentDef {
   name: string;
   description: string;
   systemPrompt: string;
-  toolTags: string[]; // 取值来自 TOOL_TAGS.value
+  toolTags: string[]; // 取值来自工具标签 value
   modelRef: { configId: string; modelId: string } | null; // 指向 modelStore 某条已启用模型
   version: number; // Agent 定义自身的 schema 版本
   inputSchemaText?: string;
@@ -25,10 +24,6 @@ export interface AgentNodeRef {
   agentId?: string;
   label?: string;
 }
-
-// 可选工具标签(仅内置):从工具注册表派生。含自定义工具的完整选项请用 useToolTags()。
-// 保留此常量供无 store 上下文的纯逻辑/校验兜底,避免工具库与 Agent 标签双维护。
-export const TOOL_TAGS = BUILTIN_TOOL_TAGS;
 
 // 新建 Agent 时可填充的字段(不含 id/version/时间戳)
 export type AgentDraft = Pick<
