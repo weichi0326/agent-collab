@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { partializeUiState, useUiStore } from './uiStore';
+import { JIZI_MIN, JIZI_MAX, partializeUiState, useUiStore } from './uiStore';
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {
@@ -63,5 +63,48 @@ describe('uiStore drawer display mode', () => {
     expect(persisted).not.toHaveProperty('view');
     expect(persisted).not.toHaveProperty('settingsSection');
     expect(persisted).not.toHaveProperty('settingsDirty');
+  });
+});
+
+describe('uiStore jizi placement', () => {
+  beforeEach(() => {
+    storage.clear();
+    useUiStore.setState({
+      jiziPlacement: 'top',
+      jiziWidth: 360,
+      jiziSideCollapsed: false,
+    });
+  });
+
+  it('defaults to top placement, 360 width, not collapsed', () => {
+    expect(useUiStore.getState().jiziPlacement).toBe('top');
+    expect(useUiStore.getState().jiziWidth).toBe(360);
+    expect(useUiStore.getState().jiziSideCollapsed).toBe(false);
+  });
+
+  it('switches placement and toggles collapse', () => {
+    useUiStore.getState().setJiziPlacement('side');
+    useUiStore.getState().setJiziSideCollapsed(true);
+    expect(useUiStore.getState().jiziPlacement).toBe('side');
+    expect(useUiStore.getState().jiziSideCollapsed).toBe(true);
+  });
+
+  it('clamps jizi width to [JIZI_MIN, JIZI_MAX]', () => {
+    useUiStore.getState().setJiziWidth(10);
+    expect(useUiStore.getState().jiziWidth).toBe(JIZI_MIN);
+    useUiStore.getState().setJiziWidth(99999);
+    expect(useUiStore.getState().jiziWidth).toBe(JIZI_MAX);
+  });
+
+  it('persists placement, width and collapse preference', () => {
+    const persisted = partializeUiState({
+      ...useUiStore.getState(),
+      jiziPlacement: 'side',
+      jiziWidth: 400,
+      jiziSideCollapsed: true,
+    });
+    expect(persisted.jiziPlacement).toBe('side');
+    expect(persisted.jiziWidth).toBe(400);
+    expect(persisted.jiziSideCollapsed).toBe(true);
   });
 });

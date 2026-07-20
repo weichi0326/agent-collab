@@ -17,6 +17,9 @@ import SettingsCenter, {
   LiveAnnouncement,
 } from './components/SettingsCenter/SettingsCenter';
 import OnboardingController from './components/Onboarding/OnboardingController';
+import JiziSideDock from './components/MasterAgentPanel/JiziSideDock';
+import { effectiveJiziPlacement, shouldRenderSideProperties } from './components/jiziLayout';
+import { useSelectedNodeContext } from './components/PropertiesPanel/useSelectedNodeContext';
 import { useCanvasStore } from './stores/canvasStore';
 import { useAgentStore } from './stores/agentStore';
 import { useModelStore } from './stores/modelStore';
@@ -96,6 +99,10 @@ function App() {
   const [startupReady, setStartupReady] = useState(false);
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
+  const jiziPlacement = useUiStore((s) => s.jiziPlacement);
+  const onboardingActive = useOnboardingStore((s) => s.status === 'active');
+  const { node: selectedNode } = useSelectedNodeContext();
+  const placement = effectiveJiziPlacement(jiziPlacement, onboardingActive);
   const workspaceState = workspaceLayerState(view);
   const [reportRefreshToken, setReportRefreshToken] = useState(0);
   const ensureCanvas = useCanvasStore((s) => s.ensureCanvas);
@@ -193,7 +200,7 @@ function App() {
           inert={workspaceState.inert}
           aria-hidden={workspaceState.inert}
         >
-          <MasterAgentDrawer />
+          {placement === 'top' && <MasterAgentDrawer />}
           <JiziCommandCenter />
           <div className="app-body anim-fade">
             <LeftSidebar />
@@ -202,7 +209,10 @@ function App() {
               <CanvasArea />
               <CanvasStatusBar />
             </div>
-            <PropertiesPanel />
+            {placement === 'top'
+              ? <PropertiesPanel />
+              : shouldRenderSideProperties(!!selectedNode) && <PropertiesPanel />}
+            {placement === 'side' && <JiziSideDock />}
           </div>
         </div>
       )}

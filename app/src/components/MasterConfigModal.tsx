@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Input, Button, App, Switch } from 'antd';
+import { Modal, Input, Button, App, Switch, Segmented } from 'antd';
 import { ClearOutlined, DeleteOutlined, DownOutlined, InboxOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { useMasterAgentStore, DEFAULT_SYSTEM_PROMPT, type MemoryKind } from '../stores/masterAgentStore';
 import { useOrchestratorStore } from '../stores/orchestratorStore';
@@ -53,6 +53,8 @@ export function JiziSettingsPanel({
   const setAutoDiagnose = useOrchestratorStore((s) => s.setEnabled);
   const drawerFullscreen = useUiStore((s) => s.drawerFullscreen);
   const setDrawerFullscreen = useUiStore((s) => s.setDrawerFullscreen);
+  const jiziPlacement = useUiStore((s) => s.jiziPlacement);
+  const setJiziPlacement = useUiStore((s) => s.setJiziPlacement);
 
   const [draft, setDraft] = useState(systemPrompt);
   const [memoryDraft, setMemoryDraft] = useState('');
@@ -129,6 +131,21 @@ export function JiziSettingsPanel({
 
   return (
     <div className="jizi-settings-panel">
+      {/* 面板位置:顶部抽屉 / 右侧边栏。切换即时生效并持久化。 */}
+      <div className="jizi-display-mode-setting">
+        <div className="jizi-display-mode-setting__copy">
+          <strong>面板位置</strong>
+          <span>选择姬子的呈现方式：从顶部下拉的抽屉，或常驻画布右侧的竖栏。</span>
+        </div>
+        <Segmented
+          value={jiziPlacement}
+          onChange={(v) => setJiziPlacement(v as 'top' | 'side')}
+          options={[
+            { label: '顶部抽屉', value: 'top' },
+            { label: '右侧边栏', value: 'side' },
+          ]}
+        />
+      </div>
       <div className="jizi-display-mode-setting">
         <div className="jizi-display-mode-setting__copy">
           <strong>显示模式</strong>

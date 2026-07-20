@@ -2323,6 +2323,169 @@ body.resizing * {
   user-select: none !important;
 }
 
+/* 姬子右侧常驻竖栏:位于画布列与属性面板之间(或最右)。
+   外层只负责留边距 + 承载拖拽把手;圆角卡片在 __inner,靠 overflow:hidden
+   裁掉子元素方角。把手放外层(不被裁剪),才能在卡片左缘正常抓取。 */
+.jizi-side-dock {
+  position: relative;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  min-height: 0;
+}
+
+.jizi-side-dock__inner {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -4px 0 16px -8px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+
+.jizi-side-dock--collapsed {
+  width: 52px;
+}
+.jizi-side-dock--collapsed .jizi-side-dock__inner {
+  align-items: center;
+  padding-top: 10px;
+}
+
+.jizi-side-dock__expand {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: #f2f3f5;
+  color: #4e5969;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.jizi-side-dock__expand:hover {
+  background: #e8f3ff;
+  color: #1677ff;
+}
+
+.jizi-side-dock__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e6eb;
+}
+
+.jizi-side-dock__session-switch {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  background: #fafafb;
+  color: #1d2129;
+  font-size: 13px;
+  cursor: pointer;
+}
+.jizi-side-dock__session-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.jizi-side-dock__actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 4px;
+}
+.jizi-side-dock__icon-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #4e5969;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.jizi-side-dock__icon-btn:hover {
+  background: #f2f3f5;
+  color: #1677ff;
+}
+
+.jizi-side-dock__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.jizi-side-dock__session-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+.jizi-side-dock__session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 姬子侧栏拖拽手柄:挂在左边缘 */
+.resize-handle--jizi {
+  left: -7px;
+}
+
+/* 侧栏较窄:功能按钮收成纯图标(隐藏文字),让工具/模型/发送同处一行不换行 */
+.jizi-side-dock .master-composer__actions {
+  gap: 6px;
+}
+.jizi-side-dock .master-composer__actions-left {
+  gap: 4px;
+  flex-shrink: 0;
+}
+.jizi-side-dock .master-attach-btn__label {
+  display: none;
+}
+.jizi-side-dock .master-attach-btn,
+.jizi-side-dock .master-websearch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  gap: 0;
+  border-radius: 8px;
+  justify-content: center;
+}
+.jizi-side-dock .master-composer__actions-right {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 模型选择器占满右侧剩余空间:默认多显示,拖宽侧栏则显示完整模型名 */
+.jizi-side-dock .master-model-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
 /* 顶部总 Agent 抽屉:pill 徽章触发,整体下沉不遮罩 */
 .master-drawer {
   position: relative;

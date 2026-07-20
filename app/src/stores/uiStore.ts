@@ -21,6 +21,9 @@ interface UiState {
   view: AppView;
   settingsSection: SettingsSection;
   settingsDirty: boolean;
+  jiziPlacement: 'top' | 'side';
+  jiziWidth: number;
+  jiziSideCollapsed: boolean;
 
   setLeftWidth: (w: number) => void;
   setRightWidth: (w: number) => void;
@@ -30,12 +33,17 @@ interface UiState {
   setView: (v: AppView) => void;
   setSettingsSection: (section: SettingsSection) => void;
   setSettingsDirty: (dirty: boolean) => void;
+  setJiziPlacement: (p: 'top' | 'side') => void;
+  setJiziWidth: (w: number) => void;
+  setJiziSideCollapsed: (v: boolean | ((prev: boolean) => boolean)) => void;
 }
 
 export const LEFT_MIN = 220;
 export const LEFT_MAX = 460;
 export const RIGHT_MIN = 280;
 export const RIGHT_MAX = 560;
+export const JIZI_MIN = 300;
+export const JIZI_MAX = 560;
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max);
@@ -47,6 +55,9 @@ export function partializeUiState(state: UiState) {
     rightWidth: state.rightWidth,
     masterModel: state.masterModel,
     drawerFullscreen: state.drawerFullscreen,
+    jiziPlacement: state.jiziPlacement,
+    jiziWidth: state.jiziWidth,
+    jiziSideCollapsed: state.jiziSideCollapsed,
   };
 }
 
@@ -61,6 +72,9 @@ export const useUiStore = create<UiState>()(
       view: 'workspace',
       settingsSection: 'models',
       settingsDirty: false,
+      jiziPlacement: 'top',
+      jiziWidth: 360,
+      jiziSideCollapsed: false,
 
       setLeftWidth: (w) => set({ leftWidth: clamp(w, LEFT_MIN, LEFT_MAX) }),
       setRightWidth: (w) => set({ rightWidth: clamp(w, RIGHT_MIN, RIGHT_MAX) }),
@@ -74,13 +88,32 @@ export const useUiStore = create<UiState>()(
       setView: (v) => set({ view: v }),
       setSettingsSection: (settingsSection) => set({ settingsSection }),
       setSettingsDirty: (settingsDirty) => set({ settingsDirty }),
+      setJiziPlacement: (jiziPlacement) => set({ jiziPlacement }),
+      setJiziWidth: (w) => set({ jiziWidth: clamp(w, JIZI_MIN, JIZI_MAX) }),
+      setJiziSideCollapsed: (v) =>
+        set((s) => ({
+          jiziSideCollapsed:
+            typeof v === 'function' ? v(s.jiziSideCollapsed) : v,
+        })),
     }),
     {
       name: 'multi-agent-ui',
       storage: createProjectStorage(),
-      version: 1,
+      version: 2,
       // 展开状态与主视图为瞬态；半屏/全屏是用户显示偏好，需要持久化。
       partialize: partializeUiState,
+      migrate: (persisted, version) => {
+        const state = (persisted ?? {}) as Partial<UiState>;
+        if (version < 2) {
+          return {
+            ...state,
+            jiziPlacement: state.jiziPlacement ?? 'top',
+            jiziWidth: state.jiziWidth ?? 360,
+            jiziSideCollapsed: state.jiziSideCollapsed ?? false,
+          };
+        }
+        return state;
+      },
     },
   ),
 );

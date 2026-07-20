@@ -30,7 +30,7 @@ export const SETTINGS_CATALOG: SettingsCatalogItem[] = [
     group: '姬子',
     title: '姬子配置',
     description: '管理人格、长期记忆和节点失败自动诊断。',
-    keywords: ['人格', '提示词', '记忆', '诊断', '系统提示词'],
+    keywords: ['人格', '提示词', '记忆', '诊断', '系统提示词', '布局', '侧边栏', '位置', '显示模式'],
   },
   {
     id: 'tools',

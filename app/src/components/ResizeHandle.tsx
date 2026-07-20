@@ -2,13 +2,14 @@ import { useEffect, useRef } from 'react';
 import { useUiStore } from '../stores/uiStore';
 
 interface Props {
-  side: 'left' | 'right';
+  side: 'left' | 'right' | 'jizi';
 }
 
 // 侧栏边缘的竖直拖动手柄:左栏挂右边缘、右栏挂左边缘
 export default function ResizeHandle({ side }: Props) {
   const setLeftWidth = useUiStore((s) => s.setLeftWidth);
   const setRightWidth = useUiStore((s) => s.setRightWidth);
+  const setJiziWidth = useUiStore((s) => s.setJiziWidth);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export default function ResizeHandle({ side }: Props) {
       if (!active) return;
       const dx = ev.clientX - startX;
       if (side === 'left') setLeftWidth(startW + dx);
+      else if (side === 'jizi') setJiziWidth(startW - dx);
       else setRightWidth(startW - dx);
     }
 
@@ -43,7 +45,9 @@ export default function ResizeHandle({ side }: Props) {
       startW =
         side === 'left'
           ? useUiStore.getState().leftWidth
-          : useUiStore.getState().rightWidth;
+          : side === 'jizi'
+            ? useUiStore.getState().jiziWidth
+            : useUiStore.getState().rightWidth;
       el!.setPointerCapture(e.pointerId);
       document.body.classList.add('resizing');
       el!.addEventListener('pointermove', onMove);
@@ -58,7 +62,7 @@ export default function ResizeHandle({ side }: Props) {
       el.removeEventListener('pointerup', stop);
       el.removeEventListener('lostpointercapture', stop);
     };
-  }, [side, setLeftWidth, setRightWidth]);
+  }, [side, setLeftWidth, setRightWidth, setJiziWidth]);
 
   return (
     <div

@@ -152,7 +152,7 @@ export function Composer({
             onClick={() => fileInputRef.current?.click()}
           >
             <PlusOutlined />
-            附件
+            <span className="master-attach-btn__label">附件</span>
           </button>
           <button
             type="button"
@@ -161,7 +161,7 @@ export function Composer({
             onClick={onOpenSkillManager}
           >
             <ClusterOutlined />
-            Skill
+            <span className="master-attach-btn__label">Skill</span>
           </button>
           <button
             type="button"
@@ -171,7 +171,7 @@ export function Composer({
             onClick={onRunHealthCheck}
           >
             <MedicineBoxOutlined />
-            体检
+            <span className="master-attach-btn__label">体检</span>
           </button>
           <Tooltip
             title={
@@ -187,7 +187,7 @@ export function Composer({
               onClick={() => setWebSearchOn((v) => !v)}
             >
               <GlobalOutlined />
-              联网搜索
+              <span className="master-attach-btn__label">联网搜索</span>
             </button>
           </Tooltip>
         </div>
