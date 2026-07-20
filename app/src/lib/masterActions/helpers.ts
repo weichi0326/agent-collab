@@ -9,9 +9,10 @@ import {
 } from '../../stores/agentStore';
 import {
   useCanvasStore,
+  type AgentNodeData,
   type AgentOutputFormat,
 } from '../../stores/canvasStore';
-import type { MasterPlanStep } from './types';
+import { MASTER_NODE_PROMPT_CAP, type MasterPlanStep } from './types';
 
 export function activeCanvasId(): string {
   const id = useCanvasStore.getState().activeId;
@@ -79,26 +80,39 @@ function ensureAgentForSpec(spec: { label: string; agentQuery?: string }): Agent
 }
 
 export function nodeFromAgentSpec(
-  spec: { label: string; agentQuery?: string; outputFormat?: AgentOutputFormat },
+  spec: {
+    label: string;
+    agentQuery?: string;
+    outputFormat?: AgentOutputFormat;
+    description?: string;
+    systemPrompt?: string;
+  },
   index: number,
 ): Node {
   const def = ensureAgentForSpec(spec);
   const label = spec.label || def.name;
+  // 姬子生成的职责/提示词优先覆盖模板兜底;省略则回退模板/默认(向后兼容旧计划)。
+  const data: AgentNodeData = {
+    agentId: def.id,
+    label,
+    description: spec.description || def.description,
+    systemPrompt: def.systemPrompt,
+    toolTags: def.toolTags,
+    modelRef: def.modelRef,
+    inputSchemaText: def.inputSchemaText ?? '',
+    outputSchemaText: def.outputSchemaText ?? '',
+    outputFormat: spec.outputFormat,
+  };
+  if (spec.systemPrompt) {
+    // 硬上限:无论姬子生成多长,写入节点时都截断到 14000,用户无法绕过。
+    data.systemPrompt = spec.systemPrompt.slice(0, MASTER_NODE_PROMPT_CAP);
+    data.systemPromptSourceName = '姬子生成';
+  }
   return {
     id: uid('node'),
     type: 'agent',
     position: { x: 140 + index * 260, y: 140 },
-    data: {
-      agentId: def.id,
-      label,
-      description: def.description,
-      systemPrompt: def.systemPrompt,
-      toolTags: def.toolTags,
-      modelRef: def.modelRef,
-      inputSchemaText: def.inputSchemaText ?? '',
-      outputSchemaText: def.outputSchemaText ?? '',
-      outputFormat: spec.outputFormat,
-    },
+    data,
   };
 }
 

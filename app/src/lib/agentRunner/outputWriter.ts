@@ -79,7 +79,7 @@ async function repairStructuredJson(
 ): Promise<JsonObject> {
   const spec = outputSpecForFormat(format);
   const prompt = [
-    `节点「${label}」的 ${spec.title} 输出没有通过内置 schema 校验。`,
+    `当前节点的 ${spec.title} 输出没有通过内置 schema 校验。`,
     '请修复为一个合法 JSON 对象。只返回 JSON，不要解释，不要 Markdown 代码块。',
     `目标 JSON 结构：${expectedJsonShape(format)}`,
     `校验错误：${reason}`,

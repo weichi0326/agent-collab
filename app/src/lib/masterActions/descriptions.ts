@@ -1,5 +1,13 @@
 ﻿import type { AgentOutputFormat } from '../../stores/canvasStore';
-import type { MasterAction, MasterPlanStep } from './types';
+import { MASTER_NODE_PROMPT_CAP, type MasterAction, type MasterPlanStep } from './types';
+
+function planPromptOverflow(steps: MasterPlanStep[]): boolean {
+  return steps.some(
+    (step) =>
+      step.type === 'add-node' &&
+      (step.systemPrompt?.length ?? 0) > MASTER_NODE_PROMPT_CAP,
+  );
+}
 
 export function describeMasterAction(action: MasterAction): string {
   switch (action.type) {
@@ -86,8 +94,13 @@ export function actionRiskNotice(action: MasterAction): string | null {
     case 'run-active-canvas':
     case 'rerun-canvas-node':
       return '风险提示：运行画布会调用模型和工具，可能消耗 token、读写产物文件，失败时会留下错误记录。';
-    case 'plan':
-      return '风险提示：确认后姬子会按计划修改当前项目里的画布或 Agent 配置，请先看清每一步是否符合你的意图。';
+    case 'plan': {
+      const base =
+        '风险提示：确认后姬子会按计划修改当前项目里的画布或 Agent 配置，请先看清每一步是否符合你的意图。';
+      return planPromptOverflow(action.steps)
+        ? `${base}注意：部分节点的提示词超过 ${MASTER_NODE_PROMPT_CAP} 字符，确认后会自动截断到 ${MASTER_NODE_PROMPT_CAP} 字符。`
+        : base;
+    }
     case 'create-canvas':
     case 'create-workflow-canvas':
     case 'create-agent':

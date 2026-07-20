@@ -5,6 +5,10 @@ import type {
   ToolMetaImplementation,
 } from '../pythonClient';
 
+// 姬子造节点时提示词硬上限;写在后台代码里,用户改不到、也绕不过(即便改姬子人格提示词
+// 骗她生成超长内容,写入节点时也会截断到这个上限)。规划提示词只是软约束,这里才是铁保证。
+export const MASTER_NODE_PROMPT_CAP = 14_000;
+
 export interface MasterAgentConfigPatch {
   name?: string;
   description?: string;
@@ -22,6 +26,8 @@ export type MasterPlanStep =
       label: string;
       agentQuery?: string;
       outputFormat?: AgentOutputFormat;
+      description?: string;
+      systemPrompt?: string;
     }
   | { type: 'connect-nodes'; source: string; target: string }
   | { type: 'delete-node'; label: string }

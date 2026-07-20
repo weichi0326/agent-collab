@@ -81,6 +81,60 @@ describe('parseJiziTurnDecision', () => {
     }
   });
 
+  it('keeps add-node systemPrompt and description', () => {
+    const decision = parseJiziTurnDecision(
+      JSON.stringify({
+        kind: 'action',
+        reason: '造带提示词的节点',
+        steps: [
+          {
+            type: 'add-node',
+            label: '世界观生成',
+            description: '生成世界观设定',
+            systemPrompt: '你负责根据输入生成完整世界观。',
+            outputFormat: 'markdown',
+          },
+        ],
+        search: { shouldSearch: false, reason: '' },
+      }),
+      opts,
+    );
+
+    expect(decision.kind).toBe('action');
+    if (decision.kind === 'action') {
+      expect(decision.action.steps[0]).toEqual({
+        type: 'add-node',
+        label: '世界观生成',
+        agentQuery: undefined,
+        outputFormat: 'markdown',
+        description: '生成世界观设定',
+        systemPrompt: '你负责根据输入生成完整世界观。',
+      });
+    }
+  });
+
+  it('omits add-node systemPrompt and description when absent', () => {
+    const decision = parseJiziTurnDecision(
+      JSON.stringify({
+        kind: 'action',
+        reason: '造无提示词节点',
+        steps: [{ type: 'add-node', label: '接口测试', outputFormat: 'markdown' }],
+        search: { shouldSearch: false, reason: '' },
+      }),
+      opts,
+    );
+
+    expect(decision.kind).toBe('action');
+    if (decision.kind === 'action') {
+      const step = decision.action.steps[0];
+      expect(step.type).toBe('add-node');
+      if (step.type === 'add-node') {
+        expect(step.systemPrompt).toBeUndefined();
+        expect(step.description).toBeUndefined();
+      }
+    }
+  });
+
   it('rejects name-only destructive targets', () => {
     const decision = parseJiziTurnDecision(
       JSON.stringify({

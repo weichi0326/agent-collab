@@ -137,11 +137,15 @@ function normalizeStep(value: unknown): MasterPlanStep | null {
   if (type === 'add-node') {
     const label = optionalTextValue(item.label);
     if (!label) return null;
+    // systemPrompt/description 姬子生成时直接写入节点;14000 上限:提示词是软约束,
+    // 真正的硬截断在写入层 helpers.nodeFromAgentSpec(MASTER_NODE_PROMPT_CAP),解析层不截断。
     return {
       type,
       label,
       agentQuery: optionalTextValue(item.agentQuery),
       outputFormat: normalizeOutputFormat(item.outputFormat),
+      description: optionalTextValue(item.description),
+      systemPrompt: optionalTextValue(item.systemPrompt),
     };
   }
   if (type === 'connect-nodes') {
@@ -322,11 +326,12 @@ function buildPlannerPrompt(
     '',
     'action steps 只允许：create-canvas、rename-active-canvas、create-agent、add-node、connect-nodes、delete-node、set-node-output-format、update-agent、update-node-agent-config、delete-canvas、delete-tool、run-active-canvas。',
     '修改 Agent 或节点配置必须提供稳定 agentId，或 canvasId+nodeId，并把白名单字段放入 patch。删除画布必须提供 canvasId，删除工具必须提供 toolName；禁止只靠显示名称猜测目标。',
+    'add-node 造节点时，必须为每个节点写出 systemPrompt（该节点完整的任务指令，将作为它的系统角色）和 description（一句话职责）。任务语义只由 systemPrompt+description 承载，节点名(label)只用于展示，不要靠节点名传达任务。systemPrompt 必须控制在 14000 字符以内。',
     'outputFormat 只能是 markdown、docx、xlsx、mindmap。用户说 Word 对应 docx，Excel 对应 xlsx。',
     '不允许规划批量运行、运行全部画布；只能规划 run-active-canvas 或回到 chat 说明。',
     '',
     '只返回 JSON，不要 Markdown，不要解释。',
-    'action 格式：{"kind":"action","reason":"短原因","summary":"一句话概括","steps":[{"type":"create-canvas","name":"画布名"}],"search":{"shouldSearch":false,"reason":"操作不搜索"}}',
+    'action 格式：{"kind":"action","reason":"短原因","summary":"一句话概括","steps":[{"type":"create-canvas","name":"画布名"},{"type":"add-node","label":"节点显示名","description":"一句话职责","systemPrompt":"完整任务指令……","outputFormat":"markdown"}],"search":{"shouldSearch":false,"reason":"操作不搜索"}}',
     'generate-tool 格式：{"kind":"generate-tool","reason":"短原因","requirement":"整理后的工具需求","search":{"shouldSearch":false,"reason":"生成工具不搜索"}}',
     'ask-choice 格式：{"kind":"ask-choice","reason":"短原因","title":"一句话问题","summary":"为什么需要选择","customPlaceholder":"自定义输入提示","options":[{"id":"a","title":"推荐方案","description":"一句话影响/取舍","recommended":true}],"search":{"shouldSearch":false,"reason":"等待选择不搜索"}}',
     'system-check 格式：{"kind":"system-check","reason":"短原因","search":{"shouldSearch":false,"reason":"体检不搜索"}}',
