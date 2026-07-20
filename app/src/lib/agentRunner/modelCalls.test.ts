@@ -46,3 +46,17 @@ describe('buildPrompt custom output rule', () => {
     expect(prompt).toContain('第一列必须是编号，第二列必须是标题。');
   });
 });
+
+describe('buildPrompt node name decoupling', () => {
+  // 名字与真实任务故意相悖:节点名不该进 prompt,任务只由职责(description)承载。
+  it('does not inject the node label into its own prompt', () => {
+    const prompt = buildPrompt(
+      agentNode({ label: '角色设定生成', description: '生成世界观' }),
+      '输入X',
+    );
+    expect(prompt).not.toContain('角色设定生成');
+    expect(prompt).not.toContain('你正在执行 Agent 节点');
+    expect(prompt).toContain('生成世界观');
+    expect(prompt).toContain('输入X');
+  });
+});

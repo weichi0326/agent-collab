@@ -54,7 +54,8 @@ export function buildPrompt(node: Node, input: string): string {
           ? '请根据输入完成该节点任务，并且只输出合法 JSON，不要使用 Markdown 代码块。JSON 格式为 {"sheet":"工作表名称","headers":["列名"],"rows":[["单元格"]]}。如果是测试用例，优先使用列：编号、标题、前置条件、步骤、预期结果、优先级。'
           : '请根据输入完成该节点任务，并且只输出合法 JSON，不要使用 Markdown 代码块。JSON 格式为 {"title":"中心主题","children":[{"title":"分支","children":[{"title":"子分支"}]}]}。';
   const promptParts = [
-    `你正在执行 Agent 节点「${nodeLabel(node)}」。`,
+    // 节点名只作画布展示/产物命名,不进 prompt:名字与真实任务相悖时会带偏生成,任务只由职责+systemPrompt 承载。
+    '你正在执行一个 Agent 节点。',
     data.description ? `节点职责：${data.description}` : '',
     outputInstruction,
     outputRuleText

@@ -280,7 +280,7 @@ async function convertInputToSchema(
 ): Promise<JsonObject> {
   const label = nodeLabel(node);
   const prompt = [
-    `节点「${label}」收到的前序输出不符合它的输入 schema。`,
+    `当前节点收到的前序输出不符合它的输入 schema。`,
     '请把输入转换成目标 schema 要求的一个 JSON 对象。只返回 JSON，不要解释，不要 Markdown 代码块。',
     `目标 JSON Schema：\n${JSON.stringify(schema, null, 2)}`,
     `当前校验问题：${validationErrors.join('；')}`,
@@ -319,7 +319,6 @@ function textInput(text: string): CollectedInput {
 }
 
 export async function collectInput(
-  canvas: Canvas,
   node: Node,
   sources: string[],
   outputs: Map<string, NodeOutput>,
@@ -369,7 +368,7 @@ export async function collectInput(
     }
     if (sections.length > 0) return { text: sections.join('\n\n'), images };
     return textInput(
-      `画布「${canvas.name}」中的节点「${nodeLabel(node)}」选择了历史产物数据来源，但未选中任何历史文件。`,
+      '当前节点选择了历史产物数据来源，但未选中任何历史文件。',
     );
   }
 
@@ -381,7 +380,5 @@ export async function collectInput(
   }
 
   if (sections.length > 0) return { text: sections.join('\n\n'), images };
-  return textInput(
-    `画布「${canvas.name}」中的节点「${nodeLabel(node)}」没有前序输入或手动数据源。`,
-  );
+  return textInput('当前节点没有前序输入或手动数据源。');
 }

@@ -596,7 +596,7 @@ async function runGraph({
         for (let attempt = 0; attempt <= NODE_RETRY_LIMIT; attempt++) {
           try {
             if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-            const input = await collectInput(canvas, node, incoming.get(node.id) ?? [], outputs, signal);
+            const input = await collectInput(node, incoming.get(node.id) ?? [], outputs, signal);
             if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
             const reply = await callNodeModel(node, input, signal);
             output = await persistOutput(canvas, node, reply, signal);
