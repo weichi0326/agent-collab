@@ -80,6 +80,30 @@ class LlmCallingRetryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "LLM 返回内容不是合法 JSON"):
                 llm_calling._post_json("https://example.test", {}, {})
 
+    def test_openai_request_includes_optional_temperature(self):
+        response = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"total_tokens": 3},
+        }
+        with patch.object(llm_calling, "_post_json", return_value=response) as post:
+            result = llm_calling._call_openai(
+                "https://example.test/v1", "key", "model", [], 8192, 0.4,
+            )
+        self.assertEqual(result, ("ok", 3))
+        self.assertEqual(post.call_args.kwargs["payload"]["temperature"], 0.4)
+
+    def test_anthropic_request_includes_optional_temperature(self):
+        response = {
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 2, "output_tokens": 1},
+        }
+        with patch.object(llm_calling, "_post_json", return_value=response) as post:
+            result = llm_calling._call_anthropic(
+                "https://example.test/v1", "key", "model", None, [], 8192, 0.4,
+            )
+        self.assertEqual(result, ("ok", 3))
+        self.assertEqual(post.call_args.kwargs["payload"]["temperature"], 0.4)
+
 
 if __name__ == "__main__":
     unittest.main()

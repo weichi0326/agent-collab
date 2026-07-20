@@ -8,6 +8,7 @@ import {
   Segmented,
   InputNumber,
   Switch,
+  Collapse,
 } from 'antd';
 import { isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -18,12 +19,14 @@ import {
   FolderOpenOutlined,
   InboxOutlined,
   RightOutlined,
+  UpOutlined,
 } from '@ant-design/icons';
 import { useUiStore } from '../stores/uiStore';
 import {
   useCanvasStore,
   upstreamNames,
   type AgentNodeData,
+  type AgentNodeCapabilities,
   type AgentOutputFormat,
 } from '../stores/canvasStore';
 import { useAgentStore } from '../stores/agentStore';
@@ -49,6 +52,20 @@ import {
   normalizeNodePromptText,
 } from './PropertiesPanel/nodePromptImport';
 import { TEXT_EXTENSIONS, fileToText, isTextFile } from '../lib/textFile';
+import {
+  INPUT_CHAR_LIMIT_MAX,
+  INPUT_CHAR_LIMIT_MIN,
+  NODE_MAX_TOKENS_MAX,
+  NODE_MAX_TOKENS_MIN,
+  NODE_TIMEOUT_SECONDS_MAX,
+  NODE_TIMEOUT_SECONDS_MIN,
+  executionCapability,
+  generationCapability,
+  inputCapability,
+  mergeNodeCapability,
+  validationCapability,
+} from '../lib/agentNodeCapabilities';
+import { rerunCanvasNode } from '../lib/agentRunner';
 
 // 桌面端(Tauri)走系统原生选择器/打开;纯浏览器回落 <input type=file> 与提示。
 const inTauri = isTauri();
@@ -73,6 +90,23 @@ const GATE_DESC: Record<'or' | 'and' | 'nor', string> = {
   nor: '全部上游都不通过，本节点才通过',
 };
 
+function CapabilityHeader({
+  title,
+  enabled,
+  summary,
+}: {
+  title: string;
+  enabled: boolean;
+  summary: string;
+}) {
+  return (
+    <div className="node-capability__header">
+      <span>{title}</span>
+      <em className={enabled ? 'is-enabled' : ''}>{summary}</em>
+    </div>
+  );
+}
+
 function PropertiesPanel() {
   const { message } = App.useApp();
   const rightWidth = useUiStore((s) => s.rightWidth);
@@ -85,6 +119,7 @@ function PropertiesPanel() {
   );
   const [promptPreviewOpen, setPromptPreviewOpen] = useState(false);
   const [outputRulePreviewOpen, setOutputRulePreviewOpen] = useState(false);
+  const [rerunLoading, setRerunLoading] = useState(false);
 
   const agentId =
     typeof node?.data?.agentId === 'string' ? node.data.agentId : undefined;
@@ -101,6 +136,21 @@ function PropertiesPanel() {
     [node, canvas],
   );
   const hasUpstream = ups.length > 0;
+  const upstreamOptions = useMemo(() => {
+    if (!node || !canvas) return [];
+    return canvas.edges
+      .filter((edge) => edge.target === node.id)
+      .map((edge) => {
+        const source = canvas.nodes.find((item) => item.id === edge.source);
+        const data = source?.data as AgentNodeData | undefined;
+        return {
+          value: edge.source,
+          label: typeof data?.label === 'string' && data.label.trim()
+            ? data.label
+            : edge.source,
+        };
+      });
+  }, [canvas, node]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptFileInputRef = useRef<HTMLInputElement>(null);
@@ -127,6 +177,13 @@ function PropertiesPanel() {
     outputRuleSourceName ?? (outputRuleText ? '已导入规则' : '未导入');
   const modelValue = packModelRef(d.modelRef ?? null);
   const modelValid = isValidModelRef(modelValue, modelOptions);
+  const inputConfig = inputCapability(d.capabilities?.input);
+  const generationConfig = generationCapability(d.capabilities?.generation);
+  const executionConfig = executionCapability(d.capabilities?.execution);
+  const validationConfig = validationCapability(d.capabilities?.validation);
+  const runRecord = canvas?.runId
+    ? useCanvasStore.getState().runHistory.find((record) => record.id === canvas.runId)
+    : undefined;
 
   const sourceMode: 'file' | 'url' | 'history' =
     d.dataSourceMode === 'url' || d.dataSourceMode === 'history'
@@ -203,6 +260,37 @@ function PropertiesPanel() {
 
   const onChangeModel = (val: string | undefined) => {
     patch({ modelRef: unpackModelRef(val) });
+  };
+
+  const patchCapability = <K extends keyof AgentNodeCapabilities,>(
+    key: K,
+    capabilityPatch: Partial<NonNullable<AgentNodeCapabilities[K]>>,
+  ) => {
+    patch({
+      capabilities: mergeNodeCapability(d.capabilities, key, capabilityPatch),
+    });
+  };
+
+  const rerunFailedNode = async () => {
+    if (!canvas || !node || !runRecord) return;
+    setRerunLoading(true);
+    try {
+      await rerunCanvasNode(canvas.id, node.id, runRecord.canvasId);
+      message.success('已重跑该节点及其下游');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '重跑失败');
+    } finally {
+      setRerunLoading(false);
+    }
+  };
+
+  const moveSelectedUpstream = (id: string, offset: -1 | 1) => {
+    const index = orderedSelectedIds.indexOf(id);
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= orderedSelectedIds.length) return;
+    const next = [...orderedSelectedIds];
+    [next[index], next[target]] = [next[target], next[index]];
+    patchCapability('input', { upstreamOrder: next });
   };
 
   const onPickPromptFile = async (file: File) => {
@@ -327,6 +415,153 @@ function PropertiesPanel() {
   const removeHistoryPath = (path: string) => {
     patch({ dataSourceHistoryPaths: historyPaths.filter((p) => p !== path) });
   };
+
+  const renderManualSourceControls = () => (
+    <div className="node-source">
+      <Radio.Group
+        size="small"
+        value={sourceMode}
+        disabled={readOnly}
+        onChange={(e) => patch({ dataSourceMode: e.target.value })}
+        options={[
+          { label: '文件', value: 'file' },
+          { label: '网页 URL（暂未支持）', value: 'url', disabled: true },
+          { label: '历史产物', value: 'history' },
+        ]}
+        optionType="button"
+      />
+      {sourceMode === 'file' ? (
+        <div className="node-source__files">
+          {!inTauri && (
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              disabled={readOnly}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                onPickFiles(e.target.files);
+                e.target.value = '';
+              }}
+            />
+          )}
+          <Button
+            size="small"
+            icon={<InboxOutlined />}
+            disabled={readOnly}
+            onClick={() =>
+              inTauri ? pickFilesTauri() : fileInputRef.current?.click()
+            }
+          >
+            选择文件
+          </Button>
+          {files.length > 0 && (
+            <div className="node-source__filelist">
+              {files.map((file) => (
+                <span key={file} className="node-source__file-chip">
+                  <FileTextOutlined />
+                  <span className="node-source__file-name">{file}</span>
+                  {!readOnly && (
+                    <CloseOutlined
+                      className="node-source__file-x"
+                      onClick={() => removeFile(file)}
+                    />
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="node-hint">
+            {files.length > 0
+              ? inTauri
+                ? `已选 ${files.length} 个文件，运行时按文件路径读取内容`
+                : `已选 ${files.length} 个文件，文件内容读取待桌面端接入`
+              : '未选择任何文件'}
+          </div>
+        </div>
+      ) : sourceMode === 'url' ? (
+        <div className="node-source__url">
+          <Input
+            disabled
+            value={typeof d.dataSourceUrl === 'string' ? d.dataSourceUrl : ''}
+          />
+          <div className="node-hint">网页 URL 暂未支持，请改用文件或历史产物</div>
+        </div>
+      ) : (
+        <div className="node-source__files">
+          <Button
+            size="small"
+            icon={<InboxOutlined />}
+            loading={historyLoading}
+            disabled={readOnly}
+            onClick={loadHistoryReports}
+          >
+            加载历史产物
+          </Button>
+          {historyPaths.length > 0 && (
+            <div className="node-source__filelist">
+              {historyPaths.map((path) => (
+                <span key={path} className="node-source__file-chip">
+                  <FileTextOutlined />
+                  <span className="node-source__file-name">{path}</span>
+                  {!readOnly && (
+                    <CloseOutlined
+                      className="node-source__file-x"
+                      onClick={() => removeHistoryPath(path)}
+                    />
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+          {historyReports.length > 0 && (
+            <div className="node-source__filelist">
+              {historyReports.map((report) => (
+                <label
+                  key={report.data_path}
+                  className="node-source__history-item"
+                  title={report.summary}
+                >
+                  <input
+                    type="checkbox"
+                    disabled={readOnly}
+                    checked={historyPaths.includes(report.data_path)}
+                    onChange={() => toggleHistoryPath(report.data_path)}
+                  />
+                  <span className="node-source__file-name">
+                    {report.canvas_name} · {report.node_label} · {report.run_at}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="node-hint">
+            {inTauri
+              ? '从既有输出选取之前的结构化产物（data.json）作为本节点输入'
+              : '仅桌面端可选历史产物'}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const validationRuleCount = [
+    validationConfig.minChars,
+    validationConfig.maxChars,
+    ...validationConfig.requiredTerms,
+    ...validationConfig.forbiddenTerms,
+  ].filter((value) => value !== null).length;
+  const selectedOrderOptions = upstreamOptions.filter((option) =>
+    inputConfig.selectedUpstreamIds.includes(option.value),
+  );
+  const orderedSelectedIds = [
+    ...inputConfig.upstreamOrder.filter((id) =>
+      inputConfig.selectedUpstreamIds.includes(id),
+    ),
+    ...inputConfig.selectedUpstreamIds.filter(
+      (id) => !inputConfig.upstreamOrder.includes(id),
+    ),
+  ];
 
   // 门控节点(OR/AND/NOR):只渲染 label/description/gateType,跳过 LLM/工具/数据源/输出格式/Schema。
   if (node && d.gateType) {
@@ -505,7 +740,18 @@ function PropertiesPanel() {
             {def && (
               <div className="agent-form__origin">源自 Agent 库：{def.name}</div>
             )}
-            <NodeRunStatus runState={d.runState} />
+            <NodeRunStatus
+              runState={d.runState}
+              onRerun={
+                readOnly &&
+                d.runState?.status === 'failed' &&
+                executionConfig.allowManualRerun &&
+                runRecord
+                  ? rerunFailedNode
+                  : undefined
+              }
+              rerunLoading={rerunLoading}
+            />
 
             <div className="agent-form__field">
               <div className="agent-form__label">名称</div>
@@ -613,7 +859,7 @@ function PropertiesPanel() {
               />
             </div>
 
-            {/* 数据来源:有前序节点则只读展示前序;否则手动选文件/URL */}
+            {/* 数据来源：基础信息常显；高级选择与补充来源在输入处理能力中配置 */}
             <div className="agent-form__field">
               <div className="agent-form__label">数据来源</div>
               {hasUpstream ? (
@@ -628,138 +874,7 @@ function PropertiesPanel() {
                   </div>
                 </div>
               ) : (
-                <div className="node-source">
-                  <Radio.Group
-                    size="small"
-                    value={sourceMode}
-                    disabled={readOnly}
-                    onChange={(e) => patch({ dataSourceMode: e.target.value })}
-                    options={[
-                      { label: '文件', value: 'file' },
-                      { label: '网页 URL', value: 'url' },
-                      { label: '历史产物', value: 'history' },
-                    ]}
-                    optionType="button"
-                  />
-                  {sourceMode === 'file' ? (
-                    <div className="node-source__files">
-                      {!inTauri && (
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            onPickFiles(e.target.files);
-                            e.target.value = '';
-                          }}
-                        />
-                      )}
-                      <Button
-                        size="small"
-                        icon={<InboxOutlined />}
-                        disabled={readOnly}
-                        onClick={() =>
-                          inTauri ? pickFilesTauri() : fileInputRef.current?.click()
-                        }
-                      >
-                        选择文件
-                      </Button>
-                      {files.length > 0 && (
-                        <div className="node-source__filelist">
-                          {files.map((f) => (
-                            <span key={f} className="node-source__file-chip">
-                              <FileTextOutlined />
-                              <span className="node-source__file-name">{f}</span>
-                              {!readOnly && (
-                                <CloseOutlined
-                                  className="node-source__file-x"
-                                  onClick={() => removeFile(f)}
-                                />
-                              )}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <div className="node-hint">
-                        {files.length > 0
-                          ? inTauri
-                            ? `已选 ${files.length} 个文件，运行时按文件路径读取内容`
-                            : `已选 ${files.length} 个文件，文件内容读取待桌面端接入`
-                          : '未选择任何文件，该节点缺少数据来源，无法运行'}
-                      </div>
-                    </div>
-                  ) : sourceMode === 'url' ? (
-                    <div className="node-source__url">
-                      <Input
-                        placeholder="https://example.com/doc"
-                        value={
-                          typeof d.dataSourceUrl === 'string'
-                            ? d.dataSourceUrl
-                            : ''
-                        }
-                        onChange={(e) =>
-                          patch({ dataSourceUrl: e.target.value })
-                        }
-                      />
-                      <div className="node-hint">网页抓取待桌面端接入</div>
-                    </div>
-                  ) : (
-                    <div className="node-source__files">
-                      <Button
-                        size="small"
-                        icon={<InboxOutlined />}
-                        loading={historyLoading}
-                        disabled={readOnly}
-                        onClick={loadHistoryReports}
-                      >
-                        加载历史产物
-                      </Button>
-                      {historyPaths.length > 0 && (
-                        <div className="node-source__filelist">
-                          {historyPaths.map((p) => (
-                            <span key={p} className="node-source__file-chip">
-                              <FileTextOutlined />
-                              <span className="node-source__file-name">{p}</span>
-                              {!readOnly && (
-                                <CloseOutlined
-                                  className="node-source__file-x"
-                                  onClick={() => removeHistoryPath(p)}
-                                />
-                              )}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {historyReports.length > 0 && (
-                        <div className="node-source__filelist">
-                          {historyReports.map((r) => (
-                            <label
-                              key={r.data_path}
-                              className="node-source__history-item"
-                              title={r.summary}
-                            >
-                              <input
-                                type="checkbox"
-                                disabled={readOnly}
-                                checked={historyPaths.includes(r.data_path)}
-                                onChange={() => toggleHistoryPath(r.data_path)}
-                              />
-                              <span className="node-source__file-name">
-                                {r.canvas_name} · {r.node_label} · {r.run_at}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                      <div className="node-hint">
-                        {inTauri
-                          ? '从既有输出选取之前的结构化产物(data.json)作为本节点输入'
-                          : '仅桌面端可选历史产物'}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                renderManualSourceControls()
               )}
             </div>
 
@@ -849,6 +964,441 @@ function PropertiesPanel() {
                  </div>
                )}
              </div>
+
+            <div className="node-capabilities">
+              <Collapse
+                size="small"
+                items={[{
+                  key: 'input',
+                  label: (
+                    <CapabilityHeader
+                      title="输入处理"
+                      enabled={inputConfig.enabled}
+                      summary={inputConfig.enabled
+                        ? `${inputConfig.selectionMode === 'all' ? '全部上游' : '指定上游'} · ${{
+                            legacy: '兼容模式',
+                            smart: '智能选择',
+                            structured: '结构化',
+                            summary: '摘要',
+                            full: '完整正文',
+                          }[inputConfig.contentMode]}`
+                        : '默认行为'}
+                    />
+                  ),
+                  children: (
+                    <div className="node-capability__body">
+                      <div className="node-capability__switch-row">
+                        <span>启用输入处理</span>
+                        <Switch
+                          size="small"
+                          checked={inputConfig.enabled}
+                          disabled={readOnly}
+                          onChange={(enabled) => patchCapability('input', { enabled })}
+                        />
+                      </div>
+                      {inputConfig.enabled && (
+                        <>
+                          {hasUpstream && (
+                            <>
+                              <div className="agent-form__field">
+                                <div className="agent-form__label">上游范围</div>
+                                <Segmented
+                                  block
+                                  size="small"
+                                  disabled={readOnly}
+                                  value={inputConfig.selectionMode}
+                                  options={[
+                                    { label: '全部上游', value: 'all' },
+                                    { label: '指定上游', value: 'selected' },
+                                  ]}
+                                  onChange={(selectionMode) => patchCapability('input', {
+                                    selectionMode: selectionMode as 'all' | 'selected',
+                                  })}
+                                />
+                              </div>
+                              {inputConfig.selectionMode === 'selected' && (
+                                <>
+                                  <div className="agent-form__field">
+                                    <div className="agent-form__label">选择上游节点</div>
+                                    <Select
+                                      mode="multiple"
+                                      allowClear
+                                      disabled={readOnly}
+                                      value={inputConfig.selectedUpstreamIds}
+                                      options={upstreamOptions}
+                                      placeholder="选择参与输入的上游节点"
+                                      onChange={(selectedUpstreamIds) => patchCapability('input', {
+                                        selectedUpstreamIds,
+                                        upstreamOrder: [
+                                          ...orderedSelectedIds.filter((id) => selectedUpstreamIds.includes(id)),
+                                          ...selectedUpstreamIds.filter((id) => !orderedSelectedIds.includes(id)),
+                                        ],
+                                      })}
+                                    />
+                                  </div>
+                                  {orderedSelectedIds.length > 1 && (
+                                    <div className="agent-form__field">
+                                      <div className="agent-form__label">处理顺序</div>
+                                      <div className="node-capability__order-list">
+                                        {orderedSelectedIds.map((id, index) => (
+                                          <div key={id} className="node-capability__order-item">
+                                            <span>{selectedOrderOptions.find((option) => option.value === id)?.label ?? id}</span>
+                                            <div>
+                                              <Button
+                                                type="text"
+                                                size="small"
+                                                icon={<UpOutlined />}
+                                                title="上移"
+                                                disabled={readOnly || index === 0}
+                                                onClick={() => moveSelectedUpstream(id, -1)}
+                                              />
+                                              <Button
+                                                type="text"
+                                                size="small"
+                                                icon={<DownOutlined />}
+                                                title="下移"
+                                                disabled={readOnly || index === orderedSelectedIds.length - 1}
+                                                onClick={() => moveSelectedUpstream(id, 1)}
+                                              />
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </>
+                          )}
+                          <div className="agent-form__field">
+                            <div className="agent-form__label">内容模式</div>
+                            <Select
+                              disabled={readOnly}
+                              value={inputConfig.contentMode}
+                              options={[
+                                { label: '兼容旧模式', value: 'legacy' },
+                                { label: '智能选择', value: 'smart' },
+                                { label: '仅结构化内容', value: 'structured' },
+                                { label: '仅摘要', value: 'summary' },
+                                { label: '完整正文', value: 'full' },
+                              ]}
+                              onChange={(contentMode) => patchCapability('input', { contentMode })}
+                            />
+                          </div>
+                          {hasUpstream && (
+                            <>
+                              <div className="node-capability__switch-row">
+                                <span>补充文件或历史产物</span>
+                                <Switch
+                                  size="small"
+                                  checked={inputConfig.includeSupplementalSources}
+                                  disabled={readOnly}
+                                  onChange={(includeSupplementalSources) =>
+                                    patchCapability('input', { includeSupplementalSources })}
+                                />
+                              </div>
+                              {inputConfig.includeSupplementalSources && renderManualSourceControls()}
+                            </>
+                          )}
+                          <div className="node-capability__grid">
+                            <div className="agent-form__field">
+                              <div className="agent-form__label">输入字符上限</div>
+                              <InputNumber
+                                min={INPUT_CHAR_LIMIT_MIN}
+                                max={INPUT_CHAR_LIMIT_MAX}
+                                step={1000}
+                                disabled={readOnly}
+                                value={inputConfig.maxInputChars}
+                                onChange={(maxInputChars) => patchCapability('input', {
+                                  maxInputChars: Number(maxInputChars ?? 120000),
+                                })}
+                              />
+                            </div>
+                            <div className="agent-form__field">
+                              <div className="agent-form__label">超长处理</div>
+                              <Select
+                                disabled={readOnly}
+                                value={inputConfig.oversizeStrategy}
+                                options={[
+                                  { label: '报错停止', value: 'error' },
+                                  { label: '截断', value: 'truncate' },
+                                  { label: '模型压缩', value: 'summarize' },
+                                ]}
+                                onChange={(oversizeStrategy) => patchCapability('input', { oversizeStrategy })}
+                              />
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ),
+                }]}
+              />
+
+              <Collapse
+                size="small"
+                items={[{
+                  key: 'generation',
+                  label: (
+                    <CapabilityHeader
+                      title="模型生成"
+                      enabled={generationConfig.enabled}
+                      summary={generationConfig.enabled
+                        ? `${generationConfig.maxTokens} tokens · ${generationConfig.temperature === null ? '继承温度' : `T ${generationConfig.temperature}`}`
+                        : '继承默认参数'}
+                    />
+                  ),
+                  children: (
+                    <div className="node-capability__body">
+                      <div className="node-capability__switch-row">
+                        <span>启用生成参数覆盖</span>
+                        <Switch
+                          size="small"
+                          checked={generationConfig.enabled}
+                          disabled={readOnly}
+                          onChange={(enabled) => patchCapability('generation', { enabled })}
+                        />
+                      </div>
+                      {generationConfig.enabled && (
+                        <>
+                          <div className="agent-form__field">
+                            <div className="agent-form__label">最大输出 Tokens</div>
+                            <InputNumber
+                              min={NODE_MAX_TOKENS_MIN}
+                              max={NODE_MAX_TOKENS_MAX}
+                              step={512}
+                              disabled={readOnly}
+                              value={generationConfig.maxTokens}
+                              onChange={(maxTokens) => patchCapability('generation', {
+                                maxTokens: Number(maxTokens ?? 4096),
+                              })}
+                            />
+                          </div>
+                          <div className="node-capability__switch-row">
+                            <span>自定义温度</span>
+                            <Switch
+                              size="small"
+                              checked={generationConfig.temperature !== null}
+                              disabled={readOnly}
+                              onChange={(checked) => patchCapability('generation', {
+                                temperature: checked ? 0.7 : null,
+                              })}
+                            />
+                          </div>
+                          {generationConfig.temperature !== null && (
+                            <InputNumber
+                              min={0}
+                              max={2}
+                              step={0.1}
+                              precision={2}
+                              disabled={readOnly}
+                              value={generationConfig.temperature}
+                              onChange={(temperature) => patchCapability('generation', {
+                                temperature: Number(temperature ?? 0.7),
+                              })}
+                            />
+                          )}
+                          <div className="agent-form__field">
+                            <div className="agent-form__label">回退模型</div>
+                            <Select
+                              allowClear
+                              disabled={readOnly || modelOptions.length === 0}
+                              placeholder="主模型重试耗尽后使用（可选）"
+                              value={packModelRef(generationConfig.fallbackModelRef)}
+                              options={modelOptions.filter((option) => option.value !== modelValue)}
+                              onChange={(value) => patchCapability('generation', {
+                                fallbackModelRef: unpackModelRef(value),
+                              })}
+                            />
+                          </div>
+                          <div className="node-capability__switch-row">
+                            <span>空输出自动重试</span>
+                            <Switch
+                              size="small"
+                              checked={generationConfig.retryOnEmpty}
+                              disabled={readOnly}
+                              onChange={(retryOnEmpty) => patchCapability('generation', { retryOnEmpty })}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ),
+                }]}
+              />
+
+              <Collapse
+                size="small"
+                items={[{
+                  key: 'execution',
+                  label: (
+                    <CapabilityHeader
+                      title="执行策略"
+                      enabled={executionConfig.enabled}
+                      summary={executionConfig.enabled
+                        ? `重试 ${executionConfig.retryCount} 次 · ${executionConfig.timeoutSeconds} 秒`
+                        : '默认 · 重试 2 次'}
+                    />
+                  ),
+                  children: (
+                    <div className="node-capability__body">
+                      <div className="node-capability__switch-row">
+                        <span>启用执行策略</span>
+                        <Switch
+                          size="small"
+                          checked={executionConfig.enabled}
+                          disabled={readOnly}
+                          onChange={(enabled) => patchCapability('execution', { enabled })}
+                        />
+                      </div>
+                      {executionConfig.enabled && (
+                        <>
+                          <div className="node-capability__grid">
+                            <div className="agent-form__field">
+                              <div className="agent-form__label">节点重试次数</div>
+                              <InputNumber
+                                min={0}
+                                max={2}
+                                disabled={readOnly}
+                                value={executionConfig.retryCount}
+                                onChange={(retryCount) => patchCapability('execution', {
+                                  retryCount: Number(retryCount ?? 0),
+                                })}
+                              />
+                            </div>
+                            <div className="agent-form__field">
+                              <div className="agent-form__label">单次超时（秒）</div>
+                              <InputNumber
+                                min={NODE_TIMEOUT_SECONDS_MIN}
+                                max={NODE_TIMEOUT_SECONDS_MAX}
+                                step={15}
+                                disabled={readOnly}
+                                value={executionConfig.timeoutSeconds}
+                                onChange={(timeoutSeconds) => patchCapability('execution', {
+                                  timeoutSeconds: Number(timeoutSeconds ?? 300),
+                                })}
+                              />
+                            </div>
+                          </div>
+                          <div className="node-capability__switch-row">
+                            <span>允许失败后手动重跑</span>
+                            <Switch
+                              size="small"
+                              checked={executionConfig.allowManualRerun}
+                              disabled={readOnly}
+                              onChange={(allowManualRerun) =>
+                                patchCapability('execution', { allowManualRerun })}
+                            />
+                          </div>
+                          <div className="node-hint">
+                            运行快照中可重跑失败节点及其下游，已成功上游不会重复执行。
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ),
+                }]}
+              />
+
+              <Collapse
+                size="small"
+                items={[{
+                  key: 'validation',
+                  label: (
+                    <CapabilityHeader
+                      title="质量校验"
+                      enabled={validationConfig.enabled}
+                      summary={validationConfig.enabled
+                        ? `${validationRuleCount} 项规则 · ${validationConfig.onFailure === 'retry' ? '失败重试' : '失败停止'}`
+                        : '未启用'}
+                    />
+                  ),
+                  children: (
+                    <div className="node-capability__body">
+                      <div className="node-capability__switch-row">
+                        <span>启用确定性校验</span>
+                        <Switch
+                          size="small"
+                          checked={validationConfig.enabled}
+                          disabled={readOnly}
+                          onChange={(enabled) => patchCapability('validation', { enabled })}
+                        />
+                      </div>
+                      {validationConfig.enabled && (
+                        <>
+                          <div className="node-capability__grid">
+                            <div className="agent-form__field">
+                              <div className="agent-form__label">最少字符</div>
+                              <InputNumber
+                                min={0}
+                                disabled={readOnly}
+                                value={validationConfig.minChars}
+                                placeholder="不限"
+                                onChange={(minChars) => patchCapability('validation', {
+                                  minChars: minChars === null ? null : Number(minChars),
+                                })}
+                              />
+                            </div>
+                            <div className="agent-form__field">
+                              <div className="agent-form__label">最多字符</div>
+                              <InputNumber
+                                min={0}
+                                disabled={readOnly}
+                                value={validationConfig.maxChars}
+                                placeholder="不限"
+                                onChange={(maxChars) => patchCapability('validation', {
+                                  maxChars: maxChars === null ? null : Number(maxChars),
+                                })}
+                              />
+                            </div>
+                          </div>
+                          <div className="agent-form__field">
+                            <div className="agent-form__label">必含词</div>
+                            <Select
+                              mode="tags"
+                              allowClear
+                              disabled={readOnly}
+                              tokenSeparators={[',', '，']}
+                              value={validationConfig.requiredTerms}
+                              placeholder="输入后回车，可添加多个"
+                              onChange={(requiredTerms) => patchCapability('validation', { requiredTerms })}
+                            />
+                          </div>
+                          <div className="agent-form__field">
+                            <div className="agent-form__label">禁用词</div>
+                            <Select
+                              mode="tags"
+                              allowClear
+                              disabled={readOnly}
+                              tokenSeparators={[',', '，']}
+                              value={validationConfig.forbiddenTerms}
+                              placeholder="输入后回车，可添加多个"
+                              onChange={(forbiddenTerms) => patchCapability('validation', { forbiddenTerms })}
+                            />
+                          </div>
+                          <div className="agent-form__field">
+                            <div className="agent-form__label">校验失败后</div>
+                            <Segmented
+                              block
+                              size="small"
+                              disabled={readOnly}
+                              value={validationConfig.onFailure}
+                              options={[
+                                { label: '标记失败', value: 'fail' },
+                                { label: '按策略重试', value: 'retry' },
+                              ]}
+                              onChange={(onFailure) => patchCapability('validation', {
+                                onFailure: onFailure as 'fail' | 'retry',
+                              })}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ),
+                }]}
+              />
+            </div>
 
             <div className="agent-form__field">
               <div className="agent-form__label">输出目录</div>

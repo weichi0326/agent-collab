@@ -18,7 +18,6 @@ import {
   MAX_CONCURRENT_RUNS,
   MAX_PARALLEL_NODES,
   NODE_RETRY_DELAY_MS,
-  NODE_RETRY_LIMIT,
   NODE_START_STAGGER_MS,
   PREFLIGHT_NODE_ID,
   RETRYABLE_NODE_ERROR_PATTERNS,
@@ -53,6 +52,17 @@ import { persistOutput } from './agentRunner/outputWriter';
 import { isNodeReady, gatePassed } from './agentRunner/gateLogic';
 import { nodeLabel } from './agentNode';
 import { reportNodeFailureToOrchestrator } from './orchestratorBridge';
+import {
+  executionAttemptPlan,
+  executionCapability,
+  generationCapability,
+} from './agentNodeCapabilities';
+import {
+  NodeOutputValidationError,
+  assertValidNodeOutput,
+  isRetryableOutputValidationError,
+  runWithNodeTimeout,
+} from './agentRunner/execution';
 
 export { RunAbortedError } from './agentRunner/types';
 export type {
@@ -593,25 +603,62 @@ async function runGraph({
         // 属于配置错误, 放在重试循环外(重试无意义), 失败走既有 catch→reportNodeFailure。
         ensureNodeCapabilities(canvas, node);
         let output: NodeOutput | undefined;
-        for (let attempt = 0; attempt <= NODE_RETRY_LIMIT; attempt++) {
-          try {
-            if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-            const input = await collectInput(node, incoming.get(node.id) ?? [], outputs, signal);
-            if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-            const reply = await callNodeModel(node, input, signal);
-            output = await persistOutput(canvas, node, reply, signal);
-            break;
-          } catch (err) {
-            if (isAbortError(err)) throw err;
-            if (attempt >= NODE_RETRY_LIMIT || !isRetryableNodeError(err)) throw err;
-            setNodeRunState(
-              canvas.id,
-              node.id,
-              'running',
-              `临时失败，正在重试（${attempt + 1}/${NODE_RETRY_LIMIT}）`,
-            );
-            updateRunningState('正在重试失败节点');
-            await sleep(NODE_RETRY_DELAY_MS);
+        const nodeData = node.data as AgentNodeData;
+        const execution = executionCapability(nodeData.capabilities?.execution);
+        const generation = generationCapability(nodeData.capabilities?.generation);
+        const attemptPlan = executionAttemptPlan(nodeData.modelRef, nodeData.capabilities);
+        attemptGroups: for (let groupIndex = 0; groupIndex < attemptPlan.length; groupIndex++) {
+          const group = attemptPlan[groupIndex];
+          for (let attempt = 0; attempt < group.attempts; attempt++) {
+            try {
+              const runAttempt = async (attemptSignal?: AbortSignal) => {
+                if (attemptSignal?.aborted) throw new DOMException('已取消', 'AbortError');
+                const input = await collectInput(
+                  node,
+                  incoming.get(node.id) ?? [],
+                  outputs,
+                  attemptSignal,
+                );
+                if (attemptSignal?.aborted) throw new DOMException('已取消', 'AbortError');
+                const reply = await callNodeModel(node, input, attemptSignal, group.modelRef);
+                if (generation.enabled && generation.retryOnEmpty && !reply.trim()) {
+                  throw new Error('LLM 返回空内容');
+                }
+                assertValidNodeOutput(reply, nodeData.capabilities?.validation);
+                return persistOutput(canvas, node, reply, attemptSignal);
+              };
+              output = execution.enabled
+                ? await runWithNodeTimeout(runAttempt, execution.timeoutSeconds, signal)
+                : await runAttempt(signal);
+              break attemptGroups;
+            } catch (err) {
+              if (isAbortError(err)) throw err;
+              const retryable = err instanceof NodeOutputValidationError
+                ? err.retryable
+                : isRetryableOutputValidationError(
+                    err,
+                    nodeData.capabilities?.validation,
+                  ) || isRetryableNodeError(err);
+              const hasAttemptRetry = attempt + 1 < group.attempts;
+              const hasFallback = group.kind === 'primary' && groupIndex + 1 < attemptPlan.length;
+              if (hasAttemptRetry && retryable) {
+                setNodeRunState(
+                  canvas.id,
+                  node.id,
+                  'running',
+                  `临时失败，正在重试（${attempt + 1}/${group.attempts - 1}）`,
+                );
+                updateRunningState('正在重试失败节点');
+                await sleep(NODE_RETRY_DELAY_MS);
+                continue;
+              }
+              if (hasFallback && retryable) {
+                setNodeRunState(canvas.id, node.id, 'running', '主模型失败，正在切换回退模型');
+                updateRunningState('正在切换回退模型');
+                break;
+              }
+              throw err;
+            }
           }
         }
         if (!output) throw new Error('节点未产生输出');

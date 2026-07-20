@@ -15,6 +15,11 @@ import { callNodeModelWithPrompt } from './modelCalls';
 import { nodeLabel } from '../agentNode';
 import { getToolDef } from '../toolRegistry';
 import { normalizeToolTags } from '../toolTagMigration';
+import {
+  applyInputLengthPolicy,
+  inputCapability,
+  selectUpstreamIds,
+} from '../agentNodeCapabilities';
 
 function pathExt(path: string): string {
   return path.split(/[\\/]/).pop()?.split('.').pop()?.toLowerCase() ?? '';
@@ -98,8 +103,9 @@ export function requiredToolTagsForNode(canvas: Canvas, node: Node): string[] {
   required.add(outputSpecForFormat(outputFormatForNode(node)).tool);
 
   const hasUpstream = canvas.edges.some((e) => e.target === node.id);
-  if (!hasUpstream) {
-    const data = node.data as AgentNodeData;
+  const data = node.data as AgentNodeData;
+  const input = inputCapability(data.capabilities?.input);
+  if (!hasUpstream || (input.enabled && input.includeSupplementalSources)) {
     const paths = [
       ...(Array.isArray(data.dataSourceFiles) ? data.dataSourceFiles : []),
       ...(Array.isArray(data.dataSourceHistoryPaths) ? data.dataSourceHistoryPaths : []),
@@ -318,45 +324,59 @@ function textInput(text: string): CollectedInput {
   return { text, images: [] };
 }
 
-export async function collectInput(
-  node: Node,
-  sources: string[],
-  outputs: Map<string, NodeOutput>,
+function upstreamInputSection(
+  output: NodeOutput,
+  mode: ReturnType<typeof inputCapability>['contentMode'],
+): string {
+  const parts = [`## 前序节点：${output.label}`];
+  if (mode === 'legacy') {
+    if (output.structuredData) {
+      parts.push(
+        `### 机器可读 JSON\n${JSON.stringify(output.structuredData, null, 2)}`,
+      );
+    }
+    if (output.summary) parts.push(`### 摘要\n${output.summary}`);
+    parts.push(`### 文本兜底\n${output.content}`);
+    return parts.join('\n\n');
+  }
+
+  if (mode === 'smart') {
+    if (output.structuredData) {
+      parts.push(`### 结构化内容\n${JSON.stringify(output.structuredData, null, 2)}`);
+    } else if (output.summary) {
+      parts.push(`### 摘要\n${output.summary}`);
+    } else {
+      parts.push(`### 完整内容\n${output.content}`);
+    }
+    return parts.join('\n\n');
+  }
+
+  if (mode === 'structured') {
+    parts.push(
+      output.structuredData
+        ? `### 结构化内容\n${JSON.stringify(output.structuredData, null, 2)}`
+        : '### 结构化内容\n该上游节点没有结构化输出。',
+    );
+  } else if (mode === 'summary') {
+    parts.push(`### 摘要\n${output.summary || output.content}`);
+  } else {
+    parts.push(`### 完整内容\n${output.content}`);
+  }
+  return parts.join('\n\n');
+}
+
+async function collectManualInput(
+  data: AgentNodeData,
   signal?: AbortSignal,
-): Promise<CollectedInput> {
-  const data = node.data as AgentNodeData;
+): Promise<CollectedInput | null> {
   const sections: string[] = [];
   const images: ChatImage[] = [];
-
-  if (sources.length > 0) {
-    const inputSchema = parseSchemaText(schemaTextFromNode(node, 'inputSchemaText'), nodeLabel(node));
-    if (inputSchema) {
-      sections.push(await schemaMatchedInputSection(node, sources, outputs, inputSchema, signal));
+  if (data.dataSourceMode === 'url') {
+    if (data.dataSourceUrl?.trim()) {
+      throw new Error('网页 URL 数据源暂未支持，请改用文件或历史产物。');
     }
-    for (const sourceId of sources) {
-      const output = outputs.get(sourceId);
-      if (!output) throw new Error(`前序节点尚无输出：${sourceId}`);
-      const parts = [`## 前序节点：${output.label}`];
-      if (output.structuredData) {
-        parts.push(
-          `### 机器可读 JSON\n${JSON.stringify(output.structuredData, null, 2)}`,
-        );
-      }
-      if (output.summary) {
-        parts.push(`### 摘要\n${output.summary}`);
-      }
-      parts.push(`### 文本兜底\n${output.content}`);
-      sections.push(parts.join('\n\n'));
-    }
-    return { text: sections.join('\n\n'), images };
+    return null;
   }
-
-  if (data.dataSourceMode === 'url' && data.dataSourceUrl?.trim()) {
-    return textInput(
-      `用户提供了网页 URL，但网页抓取尚未接入 Agent Runner：${data.dataSourceUrl.trim()}`,
-    );
-  }
-
   if (data.dataSourceMode === 'history') {
     const historyPaths = Array.isArray(data.dataSourceHistoryPaths)
       ? data.dataSourceHistoryPaths
@@ -366,19 +386,77 @@ export async function collectInput(
       sections.push(`## 历史产物：${path}\n${src.text}`);
       images.push(...src.images);
     }
-    if (sections.length > 0) return { text: sections.join('\n\n'), images };
-    return textInput(
-      '当前节点选择了历史产物数据来源，但未选中任何历史文件。',
+  } else {
+    const files = Array.isArray(data.dataSourceFiles) ? data.dataSourceFiles : [];
+    for (const file of files) {
+      const src = await readSourceInput(file, signal);
+      sections.push(`## 文件：${file}\n${src.text}`);
+      images.push(...src.images);
+    }
+  }
+  return sections.length > 0 ? { text: sections.join('\n\n'), images } : null;
+}
+
+async function applyConfiguredInputLength(
+  node: Node,
+  input: CollectedInput,
+  signal?: AbortSignal,
+): Promise<CollectedInput> {
+  const capability = (node.data as AgentNodeData).capabilities?.input;
+  const result = applyInputLengthPolicy(input.text, capability);
+  if (result.kind === 'ready') return { ...input, text: result.text };
+
+  const summary = await callNodeModelWithPrompt(
+    node,
+    [
+      `请将以下输入压缩到不超过 ${result.maxChars} 个字符。`,
+      '必须保留任务目标、关键事实、约束条件、数字与上下游标识。只输出压缩后的输入，不要解释。',
+      result.text,
+    ].join('\n\n'),
+    signal,
+  );
+  return { ...input, text: summary.slice(0, result.maxChars) };
+}
+
+export async function collectInput(
+  node: Node,
+  sources: string[],
+  outputs: Map<string, NodeOutput>,
+  signal?: AbortSignal,
+): Promise<CollectedInput> {
+  const data = node.data as AgentNodeData;
+  const inputConfig = inputCapability(data.capabilities?.input);
+  const sections: string[] = [];
+  const images: ChatImage[] = [];
+  const selectedSources = selectUpstreamIds(sources, data.capabilities?.input);
+
+  if (selectedSources.length > 0) {
+    const inputSchema = parseSchemaText(schemaTextFromNode(node, 'inputSchemaText'), nodeLabel(node));
+    if (inputSchema) {
+      sections.push(await schemaMatchedInputSection(node, selectedSources, outputs, inputSchema, signal));
+    }
+    for (const sourceId of selectedSources) {
+      const output = outputs.get(sourceId);
+      if (!output) throw new Error(`前序节点尚无输出：${sourceId}`);
+      sections.push(upstreamInputSection(output, inputConfig.contentMode));
+    }
+    if (inputConfig.enabled && inputConfig.includeSupplementalSources) {
+      const supplemental = await collectManualInput(data, signal);
+      if (supplemental) {
+        sections.push(supplemental.text);
+        images.push(...supplemental.images);
+      }
+    }
+    return applyConfiguredInputLength(
+      node,
+      { text: sections.join('\n\n'), images },
+      signal,
     );
   }
 
-  const files = Array.isArray(data.dataSourceFiles) ? data.dataSourceFiles : [];
-  for (const file of files) {
-    const src = await readSourceInput(file, signal);
-    sections.push(`## 文件：${file}\n${src.text}`);
-    images.push(...src.images);
-  }
-
-  if (sections.length > 0) return { text: sections.join('\n\n'), images };
-  return textInput('当前节点没有前序输入或手动数据源。');
+  const manual = await collectManualInput(data, signal);
+  const emptyMessage = data.dataSourceMode === 'history'
+    ? '当前节点选择了历史产物数据来源，但未选中任何历史文件。'
+    : '当前节点没有前序输入或手动数据源。';
+  return applyConfiguredInputLength(node, manual ?? textInput(emptyMessage), signal);
 }

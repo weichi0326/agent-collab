@@ -8,6 +8,7 @@ params:
   messages   (list, 必填) 消息列表 [{ role, content }]（最多 200 轮）
   system     (str, 可选) 系统提示词
   max_tokens (int, 可选) 最大回复 token 数，默认 4096，上限 16384
+  temperature(float, 可选) 采样温度，范围 0-2
 """
 import ipaddress
 import asyncio
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 # 必须同步升本版本号 + 前端 app/src/lib/pythonClient.ts 的 EXPECTED_PYTHON_SERVICE_VERSION,
 # 二者必须完全一致。否则 ensureCompatiblePythonService 无法识别旧后台、不触发强制重启,
 # 用户会跑着旧代码却以为功能坏了(如 Token 统计恒 0)。
-LLM_CALLING_VERSION = "2026-07-11.custom-model-endpoints"
+LLM_CALLING_VERSION = "2026-07-21.agent-node-options"
 TIMEOUT = 300  # 秒
 CONNECT_TIMEOUT = 15
 MAX_RETRIES = 2
@@ -191,15 +192,23 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> di
 
 
 def _call_openai(base_url: str, api_key: str, model: str,
-                 messages: list, max_tokens: int) -> tuple[str, int]:
+                 messages: list, max_tokens: int,
+                 temperature: float | None = None) -> tuple[str, int]:
     """返回 (content, total_tokens)。usage 缺失时 total=0(静默,不报错)。"""
     url = f"{base_url}/chat/completions"
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
         data = _post_json(
             url,
             headers={"Authorization": f"Bearer {api_key}"},
-            payload={"model": model, "messages": messages, "max_tokens": max_tokens},
+            payload=payload,
         )
         # L4 修复：健壮的响应解析
         choices = data.get("choices") or []
@@ -220,7 +229,8 @@ def _call_openai(base_url: str, api_key: str, model: str,
 
 
 def _call_anthropic(base_url: str, api_key: str, model: str,
-                    system: str | None, messages: list, max_tokens: int) -> tuple[str, int]:
+                    system: str | None, messages: list, max_tokens: int,
+                    temperature: float | None = None) -> tuple[str, int]:
     """返回 (text, total_tokens)。anthropic 无 total 字段,用 input+output 相加。"""
     url = f"{base_url}/messages"
     body: dict[str, Any] = {
@@ -230,6 +240,8 @@ def _call_anthropic(base_url: str, api_key: str, model: str,
     }
     if system:
         body["system"] = system
+    if temperature is not None:
+        body["temperature"] = temperature
     data = _post_json(
         url,
         headers={
@@ -255,6 +267,10 @@ async def execute(params: dict[str, Any]) -> Any:
 
     # L22 修复：max_tokens 上限
     max_tokens: int = min(int(params.get("max_tokens", 4096)), MAX_TOKENS_LIMIT)
+    temperature_raw = params.get("temperature")
+    temperature: float | None = None
+    if temperature_raw is not None:
+        temperature = min(2.0, max(0.0, float(temperature_raw)))
 
     if not base_url_raw:
         raise ValueError("缺少必填参数 base_url")
@@ -280,6 +296,7 @@ async def execute(params: dict[str, Any]) -> Any:
                 system,
                 messages,
                 max_tokens,
+                temperature,
             )
         else:
             if system:
@@ -291,6 +308,7 @@ async def execute(params: dict[str, Any]) -> Any:
                 model,
                 messages,
                 max_tokens,
+                temperature,
             )
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else 0

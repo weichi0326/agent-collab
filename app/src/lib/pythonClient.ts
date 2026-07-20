@@ -47,7 +47,7 @@ const HEALTH_TIMEOUT = 3000;  // 健康检查超时
 const EXECUTE_TIMEOUT = 300000; // 工具执行超时（LLM/文档任务可能需要较长时间）
 // ⚠️ 必须与 python/tools/llm_calling.py 的 LLM_CALLING_VERSION 完全一致。
 // 后台工具返回结构/行为一变就两处同步升,否则旧后台不会被识别并强制重启(见该文件注释)。
-export const EXPECTED_PYTHON_SERVICE_VERSION = '2026-07-11.custom-model-endpoints';
+export const EXPECTED_PYTHON_SERVICE_VERSION = '2026-07-21.agent-node-options';
 
 export type ServiceStatus = 'starting' | 'running' | 'stopped';
 

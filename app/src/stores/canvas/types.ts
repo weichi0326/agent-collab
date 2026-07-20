@@ -36,6 +36,48 @@ export interface CanvasRunState {
 
 export type AgentOutputFormat = 'markdown' | 'docx' | 'xlsx' | 'mindmap';
 
+export interface NodeInputCapability {
+  enabled?: boolean;
+  selectionMode?: 'all' | 'selected';
+  selectedUpstreamIds?: string[];
+  upstreamOrder?: string[];
+  contentMode?: 'legacy' | 'smart' | 'structured' | 'summary' | 'full';
+  includeSupplementalSources?: boolean;
+  maxInputChars?: number;
+  oversizeStrategy?: 'error' | 'truncate' | 'summarize';
+}
+
+export interface NodeGenerationCapability {
+  enabled?: boolean;
+  maxTokens?: number;
+  temperature?: number | null;
+  fallbackModelRef?: { configId: string; modelId: string } | null;
+  retryOnEmpty?: boolean;
+}
+
+export interface NodeExecutionCapability {
+  enabled?: boolean;
+  retryCount?: number;
+  timeoutSeconds?: number;
+  allowManualRerun?: boolean;
+}
+
+export interface NodeValidationCapability {
+  enabled?: boolean;
+  minChars?: number | null;
+  maxChars?: number | null;
+  requiredTerms?: string[];
+  forbiddenTerms?: string[];
+  onFailure?: 'fail' | 'retry';
+}
+
+export interface AgentNodeCapabilities {
+  input?: NodeInputCapability;
+  generation?: NodeGenerationCapability;
+  execution?: NodeExecutionCapability;
+  validation?: NodeValidationCapability;
+}
+
 export interface AgentNodeData {
   label?: string;
   collapsed?: boolean;
@@ -48,6 +90,7 @@ export interface AgentNodeData {
   outputRuleEnabled?: boolean;
   outputRuleText?: string;
   outputRuleSourceName?: string;
+  capabilities?: AgentNodeCapabilities;
   toolTags?: string[];
   modelRef?: { configId: string; modelId: string } | null;
   inputSchemaText?: string;

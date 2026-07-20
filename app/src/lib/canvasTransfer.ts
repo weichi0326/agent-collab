@@ -6,8 +6,18 @@ import { safeFileName } from './agentRunner/utils';
 import { normalizeToolTags } from './toolTagMigration';
 import { uid } from './id';
 import type { ExportResult } from './agentTransfer';
-import type { AgentNodeData, AgentOutputFormat } from '../stores/canvas/types';
+import type {
+  AgentNodeCapabilities,
+  AgentNodeData,
+  AgentOutputFormat,
+} from '../stores/canvas/types';
 import { readRoutePoints, type RoutePoint } from './orthogonalRoute';
+import {
+  executionCapability,
+  generationCapability,
+  inputCapability,
+  validationCapability,
+} from './agentNodeCapabilities';
 
 export const CANVAS_EXPORT_KIND = 'canvas-export';
 export const CANVAS_EXPORT_SCHEMA = 1;
@@ -38,6 +48,7 @@ interface ExportNodeData {
   outputRuleEnabled?: boolean;
   outputRuleText?: string;
   outputRuleSourceName?: string;
+  capabilities?: AgentNodeCapabilities;
   toolTags?: string[];
   inputSchemaText?: string;
   outputSchemaText?: string;
@@ -85,6 +96,23 @@ export interface CanvasExportInput {
 }
 
 function exportNodeData(data: AgentNodeData): ExportNodeData {
+  const capabilities = data.capabilities
+    ? {
+        ...data.capabilities,
+        input: data.capabilities.input ? { ...data.capabilities.input } : undefined,
+        generation: data.capabilities.generation
+          ? { ...data.capabilities.generation, fallbackModelRef: null }
+          : undefined,
+        execution: data.capabilities.execution ? { ...data.capabilities.execution } : undefined,
+        validation: data.capabilities.validation
+          ? {
+              ...data.capabilities.validation,
+              requiredTerms: [...(data.capabilities.validation.requiredTerms ?? [])],
+              forbiddenTerms: [...(data.capabilities.validation.forbiddenTerms ?? [])],
+            }
+          : undefined,
+      }
+    : undefined;
   return {
     label: data.label,
     description: data.description,
@@ -93,6 +121,7 @@ function exportNodeData(data: AgentNodeData): ExportNodeData {
     outputRuleEnabled: data.outputRuleEnabled,
     outputRuleText: data.outputRuleText,
     outputRuleSourceName: data.outputRuleSourceName,
+    capabilities,
     toolTags: Array.isArray(data.toolTags) ? [...data.toolTags] : undefined,
     inputSchemaText: data.inputSchemaText,
     outputSchemaText: data.outputSchemaText,
@@ -180,6 +209,24 @@ function asString(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
+function normalizeImportedCapabilities(value: unknown): AgentNodeCapabilities | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as AgentNodeCapabilities;
+  return {
+    ...(raw.input ? { input: inputCapability(raw.input) } : {}),
+    ...(raw.generation
+      ? {
+          generation: {
+            ...generationCapability(raw.generation),
+            fallbackModelRef: null,
+          },
+        }
+      : {}),
+    ...(raw.execution ? { execution: executionCapability(raw.execution) } : {}),
+    ...(raw.validation ? { validation: validationCapability(raw.validation) } : {}),
+  };
+}
+
 // 解析导入文件文本为可重建的画布。knownTags 由调用方从工具库(内置+已装自定义)提供,
 // 缺失的工具标签会被剔除并回报;节点 id / 边 id 全部重新生成避免与现有画布碰撞;
 // modelRef 一律置空由用户重选。校验不过直接抛错。
@@ -238,6 +285,7 @@ export function parseCanvasImport(text: string, knownTags: string[]): CanvasImpo
       outputRuleEnabled: d.outputRuleEnabled === true,
       outputRuleText: asString(d.outputRuleText),
       outputRuleSourceName: asString(d.outputRuleSourceName) || undefined,
+      capabilities: normalizeImportedCapabilities(d.capabilities),
       toolTags,
       modelRef: null,
       inputSchemaText: asString(d.inputSchemaText),
@@ -287,6 +335,28 @@ export function parseCanvasImport(text: string, knownTags: string[]): CanvasImpo
     } as Node;
   });
 
+  const remappedNodes = nodes.map((node) => {
+    const data = node.data as AgentNodeData;
+    const input = data.capabilities?.input;
+    if (!input) return node;
+    const remapIds = (ids: string[] | undefined) =>
+      (ids ?? []).map((id) => idMap.get(id)).filter((id): id is string => !!id);
+    return {
+      ...node,
+      data: {
+        ...data,
+        capabilities: {
+          ...data.capabilities,
+          input: {
+            ...input,
+            selectedUpstreamIds: remapIds(input.selectedUpstreamIds),
+            upstreamOrder: remapIds(input.upstreamOrder),
+          },
+        },
+      },
+    };
+  });
+
   const rawEdges = Array.isArray(canvas.edges) ? canvas.edges : [];
   const edges: Edge[] = [];
   for (const e of rawEdges) {
@@ -311,7 +381,7 @@ export function parseCanvasImport(text: string, knownTags: string[]): CanvasImpo
 
   return {
     name,
-    nodes,
+    nodes: remappedNodes,
     edges,
     droppedTags: [...droppedSet],
     clearedModelCount,

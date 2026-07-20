@@ -9,6 +9,10 @@ import { nodeLabel } from '../agentNode';
 import { outputFormatForNode } from './outputFormats';
 import { schemaTextFromNode } from './schema';
 import type { CollectedInput } from './types';
+import {
+  modelGenerationOptions,
+  type NodeModelRef,
+} from '../agentNodeCapabilities';
 
 // 按厂商协议把文本 + 图片拼成一条 user message 的 content。
 // 复用 llmClient.chat 的两套结构:anthropic 用 image source.base64;openai/gemini 用 image_url 的 data URL。
@@ -74,9 +78,10 @@ export async function callNodeModelWithPrompt(
   prompt: string,
   signal?: AbortSignal,
   images: ChatImage[] = [],
+  modelRefOverride?: NodeModelRef | null,
 ): Promise<string> {
   const data = node.data as AgentNodeData;
-  const ref = data.modelRef;
+  const ref = modelRefOverride === undefined ? data.modelRef : modelRefOverride;
   if (!ref) throw new Error(`节点「${nodeLabel(node)}」未选择 LLM。`);
 
   const config = useModelStore.getState().configs.find((c) => c.id === ref.configId);
@@ -97,6 +102,7 @@ export async function callNodeModelWithPrompt(
 
   const provider = getProvider(config.providerId);
   const api = provider?.api ?? 'openai';
+  const generation = modelGenerationOptions(data.capabilities?.generation);
   const res = await executeTool(
     'llm-calling',
     {
@@ -106,7 +112,10 @@ export async function callNodeModelWithPrompt(
       model: ref.modelId,
       system: data.systemPrompt || undefined,
       messages: [{ role: 'user', content: buildUserContent(prompt, images, api) }],
-      max_tokens: 4096,
+      max_tokens: generation.maxTokens,
+      ...(generation.temperature === undefined
+        ? {}
+        : { temperature: generation.temperature }),
     },
     signal,
   );
@@ -129,11 +138,13 @@ export async function callNodeModel(
   node: Node,
   input: CollectedInput,
   signal?: AbortSignal,
+  modelRefOverride?: NodeModelRef | null,
 ): Promise<string> {
   return callNodeModelWithPrompt(
     node,
     buildPrompt(node, input.text),
     signal,
     input.images,
+    modelRefOverride,
   );
 }

@@ -1,4 +1,5 @@
-import { Tag } from 'antd';
+import { Button, Tag } from 'antd';
+import { RedoOutlined } from '@ant-design/icons';
 import type { AgentNodeData } from '../../stores/canvasStore';
 import {
   formatDuration,
@@ -8,9 +9,15 @@ import {
 
 interface NodeRunStatusProps {
   runState: AgentNodeData['runState'];
+  onRerun?: () => void;
+  rerunLoading?: boolean;
 }
 
-export function NodeRunStatus({ runState }: NodeRunStatusProps) {
+export function NodeRunStatus({
+  runState,
+  onRerun,
+  rerunLoading = false,
+}: NodeRunStatusProps) {
   if (!runState || runState.status === 'idle') return null;
   const duration = formatDuration(runState.durationMs);
 
@@ -33,6 +40,18 @@ export function NodeRunStatus({ runState }: NodeRunStatusProps) {
       </div>
       {runState.message && (
         <div className="node-run__message">{runState.message}</div>
+      )}
+      {runState.status === 'failed' && onRerun && (
+        <Button
+          block
+          size="small"
+          className="node-run__rerun"
+          icon={<RedoOutlined />}
+          loading={rerunLoading}
+          onClick={onRerun}
+        >
+          重跑此节点及下游
+        </Button>
       )}
     </div>
   );

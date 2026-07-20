@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCanvasExport, parseCanvasImport } from './canvasTransfer';
+import type { AgentNodeData } from '../stores/canvasStore';
 
 describe('canvas prompt metadata transfer', () => {
   it('preserves the node prompt source filename through export and import', () => {
@@ -113,5 +114,57 @@ describe('canvas edge route transfer', () => {
       { x: 160, y: 200 },
       { x: 300, y: 200 },
     ]);
+  });
+});
+
+describe('canvas agent capability transfer', () => {
+  it('preserves capability settings and remaps selected upstream ids', () => {
+    const envelope = buildCanvasExport({
+      name: 'capability canvas',
+      nodes: [
+        { id: 'source', position: { x: 0, y: 0 }, data: { label: 'source' } },
+        {
+          id: 'target',
+          position: { x: 300, y: 0 },
+          data: {
+            label: 'target',
+            capabilities: {
+              input: {
+                enabled: true,
+                selectionMode: 'selected',
+                selectedUpstreamIds: ['source'],
+                upstreamOrder: ['source'],
+                contentMode: 'smart',
+              },
+              generation: {
+                enabled: true,
+                maxTokens: 8192,
+                fallbackModelRef: { configId: 'local-only', modelId: 'fallback' },
+              },
+              execution: { enabled: true, retryCount: 1, timeoutSeconds: 90 },
+              validation: { enabled: true, requiredTerms: ['结论'] },
+            },
+          },
+        },
+      ],
+      edges: [{ id: 'edge', source: 'source', target: 'target' }],
+    });
+
+    const result = parseCanvasImport(JSON.stringify(envelope), []);
+    const sourceId = result.nodes[0].id;
+    const capabilities = (result.nodes[1].data as AgentNodeData).capabilities;
+    expect(capabilities?.input).toMatchObject({
+      enabled: true,
+      selectedUpstreamIds: [sourceId],
+      upstreamOrder: [sourceId],
+      contentMode: 'smart',
+    });
+    expect(capabilities?.generation).toMatchObject({
+      enabled: true,
+      maxTokens: 8192,
+      fallbackModelRef: null,
+    });
+    expect(capabilities?.execution).toMatchObject({ retryCount: 1, timeoutSeconds: 90 });
+    expect(capabilities?.validation).toMatchObject({ requiredTerms: ['结论'] });
   });
 });
