@@ -1,4 +1,4 @@
-﻿import { Button, Input, Radio, Tag } from 'antd';
+import { Button, Input, Radio, Tag } from 'antd';
 import {
   FileUnknownOutlined,
   LoadingOutlined,

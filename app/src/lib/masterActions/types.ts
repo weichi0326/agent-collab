@@ -1,4 +1,4 @@
-﻿import type { AgentOutputFormat } from '../../stores/canvasStore';
+import type { AgentOutputFormat } from '../../stores/canvasStore';
 import type {
   InstallToolPayload,
   ToolMetaCapability,

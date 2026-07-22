@@ -6,7 +6,6 @@
 - dynamic.load_custom_tools 在新进程首次加载时，模块顶层也恰好执行一次。
 """
 import asyncio
-import importlib
 import os
 import shutil
 import sys

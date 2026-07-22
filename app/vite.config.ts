@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
-const rustTarget = /[/\\]src-tauri[/\\]target[/\\]/
+const rustTarget = /[/\\]src-tauri[/\\]target[/\\]/;
 
 // https://vite.dev/config/
 // Tauri 期望固定端口与不清屏,便于 tauri dev 稳定接管
@@ -36,4 +36,4 @@ export default defineConfig({
       '@tauri-apps/plugin-http',
     ],
   },
-})
+});

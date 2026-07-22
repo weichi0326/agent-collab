@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { App, Button, Dropdown, Input, Space } from 'antd';
-import type { MenuProps } from 'antd';
+import { App, Button, Dropdown, Input, Space, type MenuProps } from 'antd';
 import {
   CopyOutlined,
   DeleteOutlined,

@@ -7,7 +7,6 @@ params:
   limit_lines (int, 可选) mode=lines 时最多返回行数，最大 10000
 """
 import base64
-from pathlib import Path
 from typing import Any
 
 from tools.sandbox import resolve_safe_path

@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { JiziProjectObservation } from '../lib/jiziProjectObservation';
+import {
+  observeJiziProject,
+  type JiziProjectObservation,
+} from '../lib/jiziProjectObservation';
 import { createJiziTask } from '../lib/jiziAutonomy/reducer';
 import { fingerprintJiziObservation, verifyPlanStep } from '../lib/jiziAutonomy/verifier';
-import { observeJiziProject } from '../lib/jiziProjectObservation';
 import { planJiziTurnWithLLM } from '../lib/jiziTurnPlanner';
 import { requestAutonomyPendingPlan } from '../lib/jiziAutonomy/pendingBridge';
 import { useJiziAutonomyStore } from './jiziAutonomyStore';

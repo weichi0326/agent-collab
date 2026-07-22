@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { App } from 'antd';
 import {
   useEnabledModels,
@@ -52,12 +52,14 @@ import {
   planJiziSearchWithLLM,
   type JiziSearchDecision,
 } from '../lib/jiziSearchPlanner';
-import { planJiziTurnWithLLM } from '../lib/jiziTurnPlanner';
+import {
+  planJiziTurnWithLLM,
+  type JiziTurnDecision,
+} from '../lib/jiziTurnPlanner';
 import { observeJiziProject } from '../lib/jiziProjectObservation';
 import { enrichSearchResults } from '../lib/jiziDeepSearch';
 import { useJiziAutonomyStore } from '../stores/jiziAutonomyStore';
 import { assessSearchResultsWithLLM } from '../lib/jiziSearchQuality';
-import type { JiziTurnDecision } from '../lib/jiziTurnPlanner';
 import { generateToolWithLLM } from '../lib/toolGenerator';
 import {
   AUTO_SCROLL_THRESHOLD,

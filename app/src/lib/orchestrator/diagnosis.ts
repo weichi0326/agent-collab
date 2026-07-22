@@ -1,4 +1,4 @@
-﻿// 姬子自愈闭环的纯函数与类型: 从 orchestratorStore 抽出, 接受 state 作参数, 不持有 store 引用。
+// 姬子自愈闭环的纯函数与类型: 从 orchestratorStore 抽出, 接受 state 作参数, 不持有 store 引用。
 // 拆分目的: 让 orchestratorStore 顶层 store 导入收敛, 依赖方向单向 (store → 本文件), 便于独立测试。
 
 import { buildJiziSkillSystemBlock } from '../jiziSkills';

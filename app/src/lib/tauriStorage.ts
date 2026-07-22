@@ -1,5 +1,4 @@
-import { isTauri } from '@tauri-apps/api/core';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { createJSONStorage, type StateStorage } from 'zustand/middleware';
 
 // 数据持久化适配器:

@@ -1,4 +1,4 @@
-﻿import { asObject } from './jsonGuards';
+import { asObject } from './jsonGuards';
 import { executeTool, type ToolResult } from './pythonClient';
 import { chat, type LLMConfig } from './llmClient';
 import { cleanJsonFence } from './masterPlanner';

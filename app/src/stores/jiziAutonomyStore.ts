@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 import type { MasterAction, MasterPlanStep } from '../lib/masterActions';
-import { observeJiziProject, type JiziProjectObservation } from '../lib/jiziProjectObservation';
-import { formatJiziObservation } from '../lib/jiziProjectObservation';
+import {
+  formatJiziObservation,
+  observeJiziProject,
+  type JiziProjectObservation,
+} from '../lib/jiziProjectObservation';
 import { createJiziTask, reduceJiziTask } from '../lib/jiziAutonomy/reducer';
 import type { JiziAutonomyEvent, JiziAutonomyTask } from '../lib/jiziAutonomy/types';
 import { fingerprintJiziObservation, verifyPlanStep } from '../lib/jiziAutonomy/verifier';

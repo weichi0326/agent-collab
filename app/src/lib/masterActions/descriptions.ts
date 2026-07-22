@@ -1,4 +1,4 @@
-﻿import type { AgentOutputFormat } from '../../stores/canvasStore';
+import type { AgentOutputFormat } from '../../stores/canvasStore';
 import { MASTER_NODE_PROMPT_CAP, type MasterAction, type MasterPlanStep } from './types';
 
 function planPromptOverflow(steps: MasterPlanStep[]): boolean {

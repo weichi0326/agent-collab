@@ -7,7 +7,6 @@ params:
   end_page   (int, 可选) 结束页（默认最后一页）
   out_dir    (str, 可选) action=images 时的图片输出目录（须在允许根目录内）
 """
-from pathlib import Path
 from typing import Any
 
 from tools.sandbox import resolve_safe_path  # H1：路径沙箱
