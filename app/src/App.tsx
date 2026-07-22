@@ -28,6 +28,7 @@ import { useTokenStatsStore } from './stores/tokenStatsStore';
 import { useOrchestratorStore } from './stores/orchestratorStore';
 import { useJiziSkillSettingsStore } from './stores/jiziSkillStore';
 import { useOnboardingStore } from './onboarding/onboardingStore';
+import { useFictionistStore } from './features/fictionist/fictionistStore';
 import { appViewLabel, workspaceLayerState } from './settings/appView';
 import './App.css';
 
@@ -114,12 +115,21 @@ function App() {
   const recoverInterruptedRuns = useCanvasStore((s) => s.recoverInterruptedRuns);
   useEffect(() => {
     if (!hydrated) return;
-    const count = recoverInterruptedRuns();
-    ensureCanvas();
-    setStartupReady(true);
-    if (count > 0) {
-      message.warning(`已恢复 ${count} 个异常中断的运行任务`);
-    }
+    let cancelled = false;
+    const start = async () => {
+      const count = recoverInterruptedRuns();
+      ensureCanvas();
+      await useFictionistStore.getState().hydrate();
+      if (cancelled) return;
+      setStartupReady(true);
+      if (count > 0) {
+        message.warning(`已恢复 ${count} 个异常中断的运行任务`);
+      }
+    };
+    void start();
+    return () => {
+      cancelled = true;
+    };
   }, [hydrated, ensureCanvas, message, recoverInterruptedRuns]);
   useEffect(() => {
     if (!isTauri()) return;
@@ -250,4 +260,3 @@ function App() {
 }
 
 export default App;
-
