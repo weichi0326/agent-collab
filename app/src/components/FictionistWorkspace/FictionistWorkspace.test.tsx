@@ -106,4 +106,10 @@ describe('fictionist workspace mock', () => {
     expect(workspaceSource).not.toContain('演示：已在书库中新建');
     expect(workspaceSource).not.toContain('演示：已保存');
   });
+
+  it('guards unsaved content when leaving the workspace or closing the window', () => {
+    expect(workspaceSource).toContain('registerAppViewGuard');
+    expect(workspaceSource).toContain("window.addEventListener('beforeunload'");
+    expect(workspaceSource).toContain('saveCurrentChapter');
+  });
 });

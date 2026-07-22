@@ -6,6 +6,7 @@ import { useOrchestratorStore } from '../../stores/orchestratorStore';
 import { useCanvasStore } from '../../stores/canvasStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useMasterAgentStore } from '../../stores/masterAgentStore';
+import { requestAppView } from '../../settings/appNavigation';
 import type { Canvas, AgentNodeData } from '../../stores/canvas/types';
 import type { Incident } from '../../lib/orchestrator/diagnosis';
 
@@ -181,9 +182,9 @@ export function RunStatusCard({ canvas }: Props) {
 
   const collapsed = !!canvas.runCardCollapsed && view.collapsible;
 
-  const goToConfirm = () => {
+  const goToConfirm = async () => {
     if (!view.confirm) return;
-    useUiStore.getState().setView('workspace');
+    if (!(await requestAppView('workspace'))) return;
     useUiStore.getState().setDrawerExpanded(true);
     useMasterAgentStore.getState().switchSession(view.confirm.sessionId);
   };

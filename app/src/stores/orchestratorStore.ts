@@ -20,6 +20,7 @@ import {
   type ReportInput,
 } from '../lib/orchestrator/diagnosis';
 import { canAutoNavigateToWorkspace } from '../settings/settingsNavigation';
+import { requestAppView } from '../settings/appNavigation';
 import {
   capIncidents,
   reduceFinalizeRepair,
@@ -109,10 +110,12 @@ export const useOrchestratorStore = create<OrchestratorState>()(
           getMessage()?.warning('设置页有未保存修改，请先保存或放弃修改后再去确认。');
           return;
         }
-        ui.setView('workspace');
-        ui.setDrawerExpanded(true);
-        useMasterAgentStore.getState().switchSession(incident.sessionId);
-        getNotification()?.destroy(NOTIF_KEY);
+        void requestAppView('workspace').then((navigated) => {
+          if (!navigated) return;
+          ui.setDrawerExpanded(true);
+          useMasterAgentStore.getState().switchSession(incident.sessionId);
+          getNotification()?.destroy(NOTIF_KEY);
+        });
       };
 
       // 单条常驻通知,聚合所有 awaiting-confirm,标题带计数;「去确认」跳回最近一条所属会话。
@@ -605,4 +608,3 @@ registerOrchestratorBridge({
   finalizeRepair: (incidentId, ok) =>
     useOrchestratorStore.getState().finalizeRepair(incidentId, ok),
 });
-

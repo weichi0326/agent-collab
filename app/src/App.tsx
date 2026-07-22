@@ -29,6 +29,7 @@ import { useOrchestratorStore } from './stores/orchestratorStore';
 import { useJiziSkillSettingsStore } from './stores/jiziSkillStore';
 import { useOnboardingStore } from './onboarding/onboardingStore';
 import { useFictionistStore } from './features/fictionist/fictionistStore';
+import { requestAppView } from './settings/appNavigation';
 import { appViewLabel, workspaceLayerState } from './settings/appView';
 import './App.css';
 
@@ -104,7 +105,6 @@ function App() {
   const { hydrated, timedOut, forceReady } = useAllHydrated();
   const [startupReady, setStartupReady] = useState(false);
   const view = useUiStore((s) => s.view);
-  const setView = useUiStore((s) => s.setView);
   const jiziPlacement = useUiStore((s) => s.jiziPlacement);
   const onboardingActive = useOnboardingStore((s) => s.status === 'active');
   const { node: selectedNode } = useSelectedNodeContext();
@@ -203,7 +203,7 @@ function App() {
     <div className="app-shell">
       <TitleBar
         view={view}
-        setView={setView}
+        setView={(nextView) => void requestAppView(nextView)}
         onRefreshReports={() => setReportRefreshToken((v) => v + 1)}
       />
       <LiveAnnouncement message={`当前页面：${appViewLabel(view)}`} />

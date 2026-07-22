@@ -11,6 +11,7 @@ import {
   type OnboardingStatus,
 } from '../../onboarding/onboardingState';
 import { useOnboardingStore } from '../../onboarding/onboardingStore';
+import { requestAppView } from '../../settings/appNavigation';
 import {
   CAPABILITY_STEPS,
   interactionTargets,
@@ -134,7 +135,6 @@ export default function OnboardingController() {
   const tutorialAgentIds = useOnboardingStore((state) => state.tutorialAgentIds);
   const configs = useModelStore((state) => state.configs);
   const canvases = useCanvasStore((state) => state.canvases);
-  const setView = useUiStore((state) => state.setView);
   const setSection = useUiStore((state) => state.setSettingsSection);
   const drawerExpanded = useUiStore((state) => state.drawerExpanded);
 
@@ -185,22 +185,29 @@ export default function OnboardingController() {
 
   useEffect(() => {
     if (status !== 'active') return;
-    if (stage === 'models') {
-      setView('settings');
-      setSection('models');
-    } else if (stage === 'capabilities') {
-      setView('settings');
-      setSection(CAPABILITY_STEPS[capabilityStep]?.section ?? 'search');
-    } else if (stage === 'tutorial') {
-      setView('workspace');
-      const ensured = ensureTutorialResources(resources);
-      if (ensured && !resources) {
-        useOnboardingStore
-          .getState()
-          .setTutorialResources(ensured.canvasId, ensured.agentIds);
+    let cancelled = false;
+    const navigate = async () => {
+      if (stage === 'models') {
+        if (!(await requestAppView('settings')) || cancelled) return;
+        setSection('models');
+      } else if (stage === 'capabilities') {
+        if (!(await requestAppView('settings')) || cancelled) return;
+        setSection(CAPABILITY_STEPS[capabilityStep]?.section ?? 'search');
+      } else if (stage === 'tutorial') {
+        if (!(await requestAppView('workspace')) || cancelled) return;
+        const ensured = ensureTutorialResources(resources);
+        if (ensured && !resources) {
+          useOnboardingStore
+            .getState()
+            .setTutorialResources(ensured.canvasId, ensured.agentIds);
+        }
       }
-    }
-  }, [capabilityStep, resources, setSection, setView, stage, status]);
+    };
+    void navigate();
+    return () => {
+      cancelled = true;
+    };
+  }, [capabilityStep, resources, setSection, stage, status]);
 
   useEffect(() => {
     if (status !== 'active' || stage !== 'tutorial' || !milestones) return;

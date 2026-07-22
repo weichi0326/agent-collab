@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { App, Button, Drawer, Input, Modal, Result, Segmented, Spin, Tag, Tooltip } from 'antd';
 import {
   ApartmentOutlined,
@@ -33,6 +33,7 @@ import {
   type FictionistIndex,
 } from '../../features/fictionist/domain';
 import { useFictionistStore } from '../../features/fictionist/fictionistStore';
+import { registerAppViewGuard } from '../../settings/appNavigation';
 import './FictionistWorkspace.css';
 
 type FictionistSection = 'library' | 'chapters' | 'canon' | 'timeline' | 'workflows';
@@ -226,6 +227,26 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
   const [newBookGenre, setNewBookGenre] = useState('');
   const [libraryFilter, setLibraryFilter] = useState('全部书籍');
   const [query, setQuery] = useState('');
+
+  useEffect(() => registerAppViewGuard(async () => {
+    const fictionist = useFictionistStore.getState();
+    if (!fictionist.dirty) return true;
+    if (await fictionist.saveCurrentChapter()) return true;
+    message.error(
+      useFictionistStore.getState().errorMessage || '保存失败，已留在小说家工作区',
+    );
+    return false;
+  }), [message]);
+
+  useEffect(() => {
+    const preventUnsavedExit = (event: BeforeUnloadEvent) => {
+      if (!useFictionistStore.getState().dirty) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', preventUnsavedExit);
+    return () => window.removeEventListener('beforeunload', preventUnsavedExit);
+  }, []);
 
   const books = useMemo(() => bookViews(index), [index]);
   const activeBook = books.find((book) => book.id === activeProjectId) ?? books[0] ?? null;

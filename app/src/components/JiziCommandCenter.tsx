@@ -15,6 +15,7 @@ import { useMasterAgentStore } from '../stores/masterAgentStore';
 import { getServiceStatus, type ServiceStatus } from '../lib/pythonClient';
 import { buildCanvasAdvice } from '../lib/canvasAdvisor';
 import { describeMasterAction } from '../lib/masterActions';
+import { requestAppView } from '../settings/appNavigation';
 
 function serviceLabel(status: ServiceStatus | 'unknown'): string {
   if (status === 'running') return '后台正常';
@@ -45,7 +46,6 @@ export default function JiziCommandCenter() {
   const incidents = useOrchestratorStore((s) => s.incidents);
   const ignoreIncident = useOrchestratorStore((s) => s.ignoreIncident);
   const setActive = useCanvasStore((s) => s.setActive);
-  const setView = useUiStore((s) => s.setView);
   const setDrawerExpanded = useUiStore((s) => s.setDrawerExpanded);
   const switchSession = useMasterAgentStore((s) => s.switchSession);
   const pendingActions = usePendingActionStore((s) => s.pendingActions);
@@ -171,14 +171,14 @@ export default function JiziCommandCenter() {
     setResolvedOpen(false);
   };
 
-  const jumpToCanvas = (id: string) => {
+  const jumpToCanvas = async (id: string) => {
+    if (!(await requestAppView('workspace'))) return;
     setActive(id);
-    setView('workspace');
     closeAllModals();
   };
 
-  const jumpToSession = (sessionId: string) => {
-    setView('workspace');
+  const jumpToSession = async (sessionId: string) => {
+    if (!(await requestAppView('workspace'))) return;
     setDrawerExpanded(true);
     switchSession(sessionId);
     closeAllModals();
@@ -379,4 +379,3 @@ export default function JiziCommandCenter() {
     </div>
   );
 }
-
