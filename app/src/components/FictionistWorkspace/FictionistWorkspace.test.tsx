@@ -3,13 +3,19 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import FictionistWorkspace from './FictionistWorkspace';
 
+type FictionistSection = 'library' | 'chapters' | 'canon' | 'timeline' | 'workflows';
+
+function renderWorkspace(initialSection?: FictionistSection): string {
+  return renderToStaticMarkup(
+    <AntdApp>
+      <FictionistWorkspace initialSection={initialSection} />
+    </AntdApp>,
+  );
+}
+
 describe('fictionist workspace mock', () => {
   it('renders the library as a categorized bookshelf', () => {
-    const html = renderToStaticMarkup(
-      <AntdApp>
-        <FictionistWorkspace />
-      </AntdApp>,
-    );
+    const html = renderWorkspace();
 
     expect(html).toContain('我的书库');
     expect(html).toContain('我的书架');
@@ -27,11 +33,7 @@ describe('fictionist workspace mock', () => {
   });
 
   it('renders project tools as a second-level workspace after opening a book', () => {
-    const html = renderToStaticMarkup(
-      <AntdApp>
-        <FictionistWorkspace initialSection="chapters" />
-      </AntdApp>,
-    );
+    const html = renderWorkspace('chapters');
 
     expect(html).toContain('作品功能');
     expect(html).toContain('正文');
@@ -41,5 +43,43 @@ describe('fictionist workspace mock', () => {
     expect(html).toContain('返回书架');
     expect(html).toContain('返回书库切换作品');
     expect(html).not.toContain('书架分类');
+  });
+
+  it('renders the chapter editor baseline', () => {
+    const html = renderWorkspace('chapters');
+
+    expect(html).toContain('卷与章节');
+    expect(html).toContain('章节正文编辑区');
+    expect(html).toContain('续写下一章');
+    expect(html).toContain('本章上下文');
+    expect(html).toContain('七号泊位');
+  });
+
+  it('renders the canon baseline', () => {
+    const html = renderWorkspace('canon');
+
+    expect(html).toContain('作品事实库');
+    expect(html).toContain('设定库');
+    expect(html).toContain('新建设定');
+    expect(html).toContain('林砚');
+    expect(html).toContain('旧海关钟塔');
+  });
+
+  it('renders the timeline baseline', () => {
+    const html = renderWorkspace('timeline');
+
+    expect(html).toContain('事件与章节同步');
+    expect(html).toContain('故事时间线');
+    expect(html).toContain('新增事件');
+    expect(html).toContain('七号泊位因事故永久封闭');
+  });
+
+  it('renders the workflow baseline', () => {
+    const html = renderWorkspace('workflows');
+
+    expect(html).toContain('从画布能力组合而来');
+    expect(html).toContain('小说工作流');
+    expect(html).toContain('在画布中编辑');
+    expect(html).toContain('章节连续性检查');
   });
 });
