@@ -8,11 +8,11 @@
   --pearl-surface-solid: #fbfcfb;
   --pearl-surface-muted: #e9eeeb;
   --pearl-glass: rgba(248, 250, 249, 0.78);
-  --pearl-text: #303734;
-  --pearl-text-secondary: #6f7874;
-  --pearl-text-tertiary: #929a96;
-  --pearl-border: rgba(86, 103, 96, 0.16);
-  --pearl-border-strong: rgba(86, 103, 96, 0.25);
+  --pearl-text: #28302c;
+  --pearl-text-secondary: #59635e;
+  --pearl-text-tertiary: #737d77;
+  --pearl-border: rgba(86, 103, 96, 0.22);
+  --pearl-border-strong: rgba(86, 103, 96, 0.32);
   --pearl-accent: #6f8980;
   --pearl-accent-hover: #607a72;
   --pearl-accent-soft: rgba(111, 137, 128, 0.14);
@@ -5898,6 +5898,7 @@ body.resizing * {
   background: var(--pearl-glass);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(var(--glass-blur)) saturate(115%);
+  position: relative;
 }
 
 .title-bar__logo {
@@ -5923,6 +5924,53 @@ body.resizing * {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.title-bar__workspace-tabs {
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 38px;
+  padding: 3px;
+  border: 1px solid var(--pearl-border);
+  border-radius: 999px;
+  background: var(--pearl-surface-muted);
+  transform: translateX(-50%);
+}
+
+.title-bar__workspace-tab {
+  min-width: 76px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pearl-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.title-bar__workspace-tab:hover {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--pearl-text);
+}
+
+.title-bar__workspace-tab:focus-visible {
+  outline: 2px solid var(--pearl-accent-hover);
+  outline-offset: 1px;
+}
+
+.title-bar__workspace-tab.is-active {
+  background: var(--pearl-accent);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 2px 7px rgba(51, 75, 67, 0.18);
 }
 
 .title-bar .ant-btn {
@@ -6706,5 +6754,117 @@ body.resizing * {
 
   .ant-modal {
     padding-bottom: 12px;
+  }
+}
+
+/* Pearl readability baseline: keep secondary text legible across desktop surfaces. */
+.app-shell .ant-input::placeholder,
+.app-shell .ant-select-selection-placeholder {
+  color: var(--pearl-text-tertiary);
+  opacity: 1;
+}
+
+.app-shell .ant-empty-description {
+  color: var(--pearl-text-secondary);
+  font-size: 13px;
+}
+
+.special-palette .ant-collapse-header-text,
+.special-chip,
+.canvas-statusbar,
+.node-capability__switch-row,
+.node-capability__order-item > span {
+  color: var(--pearl-text-secondary);
+  font-size: 13px;
+}
+
+.canvas-tabs .ant-tabs-tab,
+.agent-card__name {
+  font-size: 14px;
+}
+
+.canvas-tabs .ant-tabs-tab {
+  color: var(--pearl-text-secondary);
+}
+
+.canvas-empty {
+  color: var(--pearl-text-secondary);
+}
+
+.canvas-empty__text {
+  font-size: 15px;
+}
+
+.agent-card__name {
+  color: var(--pearl-text);
+}
+
+.agent-card__grip,
+.agent-card__act {
+  color: var(--pearl-text-tertiary);
+}
+
+.node-capability__header > em {
+  color: var(--pearl-text-tertiary);
+  font-size: 12px;
+}
+
+.settings-nav__group-label,
+.settings-content__kicker {
+  font-size: 13px;
+}
+
+.settings-nav__item-copy strong {
+  font-size: 14px;
+}
+
+.settings-nav__item-copy span {
+  color: var(--pearl-text-secondary);
+  font-size: 12px;
+}
+
+.settings-content__header p {
+  color: var(--pearl-text-secondary);
+  font-size: 14px;
+}
+
+.report-center__subtitle,
+.report-center__muted {
+  font-size: 14px;
+}
+
+.report-stat span {
+  font-size: 13px;
+}
+
+.report-section__head > span {
+  font-size: 15px;
+}
+
+.report-rank__main span,
+.report-table__artifact-text span {
+  font-size: 14px;
+}
+
+.report-rank__main small,
+.report-table__artifact-text small,
+.report-token-block__title,
+.report-tokens__disclaimer {
+  color: var(--pearl-text-secondary);
+  font-size: 13px;
+}
+
+.report-token-row {
+  font-size: 14px;
+}
+
+.report-token-row--muted span,
+.report-token-row--muted strong {
+  color: var(--pearl-text-tertiary);
+}
+
+@media (max-width: 1399px) {
+  .title-bar__workspace-tabs {
+    left: 40%;
   }
 }

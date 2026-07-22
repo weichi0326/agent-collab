@@ -24,8 +24,16 @@ describe('workspace layer state', () => {
     });
   });
 
+  it('isolates the fictionist workspace from the canvas layout', () => {
+    expect(workspaceLayerState('fictionist')).toEqual({
+      mounted: false,
+      inert: false,
+    });
+  });
+
   it('labels settings as a first-class application view', () => {
     expect(appViewLabel('workspace')).toBe('工作台');
+    expect(appViewLabel('fictionist')).toBe('小说家');
     expect(appViewLabel('reports')).toBe('报告中心');
     expect(appViewLabel('settings')).toBe('设置');
   });
@@ -40,6 +48,10 @@ describe('workspace layer state', () => {
       deleteKeyCode: null,
     });
     expect(workspaceInteractionState('reports')).toEqual({
+      hotkeysEnabled: false,
+      deleteKeyCode: null,
+    });
+    expect(workspaceInteractionState('fictionist')).toEqual({
       hotkeysEnabled: false,
       deleteKeyCode: null,
     });

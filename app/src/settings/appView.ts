@@ -11,13 +11,14 @@ export interface WorkspaceInteractionState {
 }
 
 export function appViewLabel(view: AppView): string {
+  if (view === 'fictionist') return '小说家';
   if (view === 'reports') return '报告中心';
   if (view === 'settings') return '设置';
   return '工作台';
 }
 
 export function workspaceLayerState(view: AppView): WorkspaceLayerState {
-  if (view === 'reports') {
+  if (view === 'reports' || view === 'fictionist') {
     return { mounted: false, inert: false };
   }
   return {

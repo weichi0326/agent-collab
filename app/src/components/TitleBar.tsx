@@ -45,10 +45,17 @@ interface PrimaryViewActionsProps {
   view: AppView;
   onWorkspace: () => void;
   onReports: () => void;
+  onFictionist: () => void;
   onSettings: () => void;
   onRefreshReports: () => void;
   onOpenOutput: () => void;
   settingsButtonRef?: Ref<HTMLAnchorElement | HTMLButtonElement>;
+}
+
+interface WorkspaceTabsProps {
+  view: AppView;
+  onWorkspace: () => void;
+  onFictionist: () => void;
 }
 
 interface FocusTarget {
@@ -64,6 +71,29 @@ export function restoreSettingsButtonFocus(
   if (previousView === 'settings' && view === 'workspace') {
     target?.focus();
   }
+}
+
+export function WorkspaceTabs({ view, onWorkspace, onFictionist }: WorkspaceTabsProps) {
+  return (
+    <nav className="title-bar__workspace-tabs" aria-label="工作区">
+      <button
+        type="button"
+        className={`title-bar__workspace-tab${view === 'workspace' ? ' is-active' : ''}`}
+        aria-current={view === 'workspace' ? 'page' : undefined}
+        onClick={onWorkspace}
+      >
+        工作台
+      </button>
+      <button
+        type="button"
+        className={`title-bar__workspace-tab${view === 'fictionist' ? ' is-active' : ''}`}
+        aria-current={view === 'fictionist' ? 'page' : undefined}
+        onClick={onFictionist}
+      >
+        小说家
+      </button>
+    </nav>
+  );
 }
 
 export function PrimaryViewActions({
@@ -411,6 +441,11 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
       <span className={`title-bar__mode title-bar__mode--${view}`}>
         {appViewLabel(view)}
       </span>
+      <WorkspaceTabs
+        view={view}
+        onWorkspace={openWorkspace}
+        onFictionist={() => setView('fictionist')}
+      />
       <div className="title-bar__spacer" />
       <Button
         className="title-bar__compact-action"
@@ -425,6 +460,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
           <PrimaryViewActions
             view={view}
             onWorkspace={openWorkspace}
+            onFictionist={() => setView('fictionist')}
             onReports={() => setView('reports')}
             onSettings={openSettings}
             onRefreshReports={onRefreshReports}
@@ -484,6 +520,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
         <PrimaryViewActions
           view={view}
           onWorkspace={openWorkspace}
+          onFictionist={() => setView('fictionist')}
           onReports={() => setView('reports')}
           onSettings={openSettings}
           onRefreshReports={onRefreshReports}

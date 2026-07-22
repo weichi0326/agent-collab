@@ -7,6 +7,8 @@ describe('settings keyboard styles', () => {
   it('defines the Pearl Order color, radius, glass, and motion contracts', () => {
     expect(styles).toContain('--pearl-bg: #f3f5f3;');
     expect(styles).toContain('--pearl-surface: rgba(251, 252, 251, 0.94);');
+    expect(styles).toContain('--pearl-text-secondary: #59635e;');
+    expect(styles).toContain('--pearl-text-tertiary: #737d77;');
     expect(styles).toContain('--pearl-accent: #6f8980;');
     expect(styles).toContain('--radius-panel: 20px;');
     expect(styles).toContain('--radius-dialog: 24px;');
@@ -49,6 +51,12 @@ describe('settings keyboard styles', () => {
     expect(styles).toMatch(
       /\.report-center\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s,
     );
+  });
+
+  it('keeps desktop settings and report copy readable', () => {
+    expect(styles).toMatch(/\.settings-nav__item-copy span\s*\{[^}]*font-size:\s*12px;/s);
+    expect(styles).toMatch(/\.report-center__subtitle,[\s\S]*font-size:\s*14px;/s);
+    expect(styles).toMatch(/\.report-token-row\s*\{[^}]*font-size:\s*14px;/s);
   });
 
   it('reveals model delete actions within a focused row', () => {

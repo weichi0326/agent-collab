@@ -7,7 +7,7 @@ import type { SettingsSection } from '../settings/settingsCatalog';
 // 总 Agent 选用的对话模型(指向 modelStore 中某条已启用模型)
 export type MasterModel = ModelRef;
 
-export type AppView = 'workspace' | 'reports' | 'settings';
+export type AppView = 'workspace' | 'fictionist' | 'reports' | 'settings';
 
 interface UiState {
   leftWidth: number;

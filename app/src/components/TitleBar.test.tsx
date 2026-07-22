@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   PrimaryViewActions,
   restoreSettingsButtonFocus,
+  WorkspaceTabs,
 } from './TitleBar';
 
 const noop = () => undefined;
@@ -30,6 +31,7 @@ describe('title bar primary view actions', () => {
       <PrimaryViewActions
         view="workspace"
         onWorkspace={noop}
+        onFictionist={noop}
         onReports={noop}
         onSettings={noop}
         onRefreshReports={noop}
@@ -42,11 +44,23 @@ describe('title bar primary view actions', () => {
     expect(html).not.toContain('aria-haspopup');
   });
 
+  it('renders workspaces as top-level tabs', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceTabs view="fictionist" onWorkspace={noop} onFictionist={noop} />,
+    );
+
+    expect(html).toContain('工作台');
+    expect(html).toContain('小说家');
+    expect(html).toContain('title-bar__workspace-tabs');
+    expect(html).toContain('aria-current="page"');
+  });
+
   it('labels the primary view navigation for the Pearl shell', () => {
     const html = renderToStaticMarkup(
       <PrimaryViewActions
         view="workspace"
         onWorkspace={noop}
+        onFictionist={noop}
         onReports={noop}
         onSettings={noop}
         onRefreshReports={noop}
@@ -68,6 +82,7 @@ describe('title bar primary view actions', () => {
       <PrimaryViewActions
         view="settings"
         onWorkspace={noop}
+        onFictionist={noop}
         onReports={noop}
         onSettings={noop}
         onRefreshReports={noop}
@@ -80,11 +95,30 @@ describe('title bar primary view actions', () => {
     expect(html).not.toContain('打开输出目录');
   });
 
+  it('keeps utility navigation while fictionist is active', () => {
+    const html = renderToStaticMarkup(
+      <PrimaryViewActions
+        view="fictionist"
+        onWorkspace={noop}
+        onFictionist={noop}
+        onReports={noop}
+        onSettings={noop}
+        onRefreshReports={noop}
+        onOpenOutput={noop}
+      />,
+    );
+
+    expect(html).toContain('报告中心');
+    expect(html).toContain('设置');
+    expect(html).not.toContain('返回工作台');
+  });
+
   it('preserves report refresh and output actions', () => {
     const html = renderToStaticMarkup(
       <PrimaryViewActions
         view="reports"
         onWorkspace={noop}
+        onFictionist={noop}
         onReports={noop}
         onSettings={noop}
         onRefreshReports={noop}

@@ -35,6 +35,9 @@ const ReportCenter = lazy(() => import('./components/ReportCenter/ReportCenter')
 const SettingsCenter = lazy(
   () => import('./components/SettingsCenter/SettingsCenter'),
 );
+const FictionistWorkspace = lazy(
+  () => import('./components/FictionistWorkspace/FictionistWorkspace'),
+);
 
 // 桌面端 persist 从项目内 JSON 异步读盘,首帧数据为空。等所有 store 完成 hydration
 // 再渲染主体,避免空态闪烁与 ensureCanvas 竞态(浏览器 localStorage 兜底为同步,几乎瞬时就绪)。
@@ -229,6 +232,13 @@ function App() {
         <div className="app-view-stage pearl-page-enter">
           <Suspense fallback={<Spin description="加载设置…" />}>
             <SettingsCenter />
+          </Suspense>
+        </div>
+      )}
+      {view === 'fictionist' && (
+        <div className="app-view-stage pearl-page-enter">
+          <Suspense fallback={<Spin description="加载小说家工作区…" />}>
+            <FictionistWorkspace />
           </Suspense>
         </div>
       )}
