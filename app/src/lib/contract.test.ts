@@ -3,12 +3,13 @@
 // 这里 readFileSync 解析源文件并断言四轴一致:
 //   1. 工具名   :TOOL_REGISTRY(toolRegistry.ts) ↔ BUILTIN_META(dynamic.py)
 //   2. 服务版本 :EXPECTED_PYTHON_SERVICE_VERSION(pythonClient.ts) ↔ LLM_CALLING_VERSION(llm_calling.py)
-//   3. 允许域名 :tauri.conf connect-src ↔ capabilities http allow;且前端会请求的 LLM/搜索域名都被放行
-//   4. 白名单同步:Python _ALLOWED_DOMAINS 去回环后 === providers.ts 的 LLM 域名集合
+//   3. 网络权限 :tauri.conf connect-src ↔ capabilities http allow;且前端会请求的 LLM/搜索域名都被放行
+//   4. 模型策略 :providers.ts 的地址符合模型端点规则，Python LLM 调用使用共享网络策略
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { parseModelBaseUrl } from './modelEndpoint';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (rel: string) => readFileSync(resolve(here, rel), 'utf-8');
@@ -19,6 +20,8 @@ const searchClientSrc = read('./searchClient.ts');
 const pythonClientSrc = read('./pythonClient.ts');
 const dynamicSrc = read('../../../python/tools/dynamic.py');
 const llmCallingSrc = read('../../../python/tools/llm_calling.py');
+const agentNodeCapabilitiesSrc = read('./agentNodeCapabilities.ts');
+const networkPolicySrc = read('../../../python/network_policy.py');
 const tauriConf = JSON.parse(read('../../src-tauri/tauri.conf.json'));
 const capabilities = JSON.parse(read('../../src-tauri/capabilities/default.json'));
 
@@ -45,17 +48,10 @@ const expectedVer = capture(
 const llmVer = capture(llmCallingSrc, /LLM_CALLING_VERSION\s*=\s*"([^"]+)"/g)[0];
 
 // ── 前端会请求的域名 ──
-const feLlmHosts = new Set(
-  capture(providersSrc, /baseURL: '(https:\/\/[^']+)'/g).map(toHost),
-);
+const feLlmUrls = new Set(capture(providersSrc, /baseURL: '(https:\/\/[^']+)'/g));
+const feLlmHosts = new Set([...feLlmUrls].map(toHost));
 const feSearchHosts = new Set(
   capture(searchClientSrc, /(https:\/\/[a-z0-9.-]+)/g).map(toHost),
-);
-
-// ── Python 白名单 ──
-const allowBlock = llmCallingSrc.slice(llmCallingSrc.indexOf('_ALLOWED_DOMAINS'));
-const pyAllow = new Set(
-  capture(allowBlock.slice(0, allowBlock.indexOf('}')), /"([a-z0-9.:-]+)"/g),
 );
 
 // ── Tauri 允许域名(两份 allow-list)──
@@ -83,7 +79,7 @@ describe('契约:解析非空守卫(防空集互等的假通过)', () => {
     expect(feSearchHosts.size).toBe(3);
     expect(connectHosts.size).toBeGreaterThan(0);
     expect(capHosts.size).toBeGreaterThan(0);
-    expect(pyAllow.size).toBeGreaterThan(0);
+    expect(networkPolicySrc).toContain('def validate_model_base_url');
     expect(expectedVer).toBeTruthy();
     expect(llmVer).toBeTruthy();
   });
@@ -119,15 +115,36 @@ describe('契约:前端会请求的域名都被放行', () => {
   it.each(feAll)('%s 在 capabilities 中', (h) => {
     expect(capAllowsAllHttps || capHosts.has(h)).toBe(true);
   });
-  it.each([...feLlmHosts])('LLM 域名 %s 在 Python _ALLOWED_DOMAINS 中', (h) => {
-    expect(pyAllow.has(h)).toBe(true);
+});
+
+describe('契约:模型输出 token 上限一致', () => {
+  it('前端可配置上限与 Python 实际请求上限相同', () => {
+    const frontendLimit = capture(
+      agentNodeCapabilitiesSrc,
+      /NODE_MAX_TOKENS_MAX\s*=\s*([\d_]+)/g,
+    )[0];
+    const pythonLimit = capture(
+      llmCallingSrc,
+      /MAX_TOKENS_LIMIT\s*=\s*([\d_]+)/g,
+    )[0];
+
+    expect(frontendLimit).toBeTruthy();
+    expect(Number(pythonLimit.replaceAll('_', ''))).toEqual(
+      Number(frontendLimit.replaceAll('_', '')),
+    );
   });
 });
 
-describe('契约:_ALLOWED_DOMAINS 与前端 providers 同步', () => {
-  it('_ALLOWED_DOMAINS 去掉本机回环后 === providers LLM 域名集合', () => {
-    const loopback = new Set(['localhost', '127.0.0.1']);
-    const pyLlm = [...pyAllow].filter((h) => !loopback.has(h)).sort();
-    expect(pyLlm).toEqual([...feLlmHosts].sort());
+describe('契约:模型端点使用共享公网策略', () => {
+  it.each([...feLlmUrls])('%s 符合模型端点 URL 规则', (url) => {
+    expect(() => parseModelBaseUrl(url)).not.toThrow();
+  });
+
+  it('Python LLM 调用使用共享网络策略而非域名白名单', () => {
+    expect(llmCallingSrc).toContain(
+      'from network_policy import validate_model_base_url as _validate_base_url',
+    );
+    expect(llmCallingSrc).toContain('base_url = _validate_base_url(base_url_raw)');
+    expect(llmCallingSrc).not.toContain('_ALLOWED_DOMAINS');
   });
 });

@@ -2,9 +2,8 @@
 // 调用模式与 llmClient.ts 一致：Tauri 桌面端用插件 fetch 绕 CORS，浏览器预览回落原生 fetch。
 // Python 服务监听 localhost:18081，由 Tauri setup 时自动拉起。
 
-import { isTauri } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
-import { invoke } from '@tauri-apps/api/core';
 import { createTimeoutSignal } from './abortUtils'; // M1：消除重复超时信号逻辑
 
 const httpFetch: typeof fetch = isTauri() ? (tauriFetch as typeof fetch) : fetch;
@@ -47,7 +46,7 @@ const HEALTH_TIMEOUT = 3000;  // 健康检查超时
 const EXECUTE_TIMEOUT = 300000; // 工具执行超时（LLM/文档任务可能需要较长时间）
 // ⚠️ 必须与 python/tools/llm_calling.py 的 LLM_CALLING_VERSION 完全一致。
 // 后台工具返回结构/行为一变就两处同步升,否则旧后台不会被识别并强制重启(见该文件注释)。
-export const EXPECTED_PYTHON_SERVICE_VERSION = '2026-07-21.agent-node-options';
+export const EXPECTED_PYTHON_SERVICE_VERSION = '2026-07-22.code-audit';
 
 export type ServiceStatus = 'starting' | 'running' | 'stopped';
 
@@ -162,10 +161,19 @@ export async function listTools(): Promise<string[]> {
   const { signal, done } = createTimeoutSignal(HEALTH_TIMEOUT);
   try {
     const res = await pyFetch(`${BASE_URL}/tools`, { signal });
-    if (!res.ok) return [];
-    return (await res.json()) as string[];
-  } catch {
-    return [];
+    if (!res.ok) throw new Error(`Python 工具服务返回 HTTP ${res.status}`);
+    const payload: unknown = await res.json();
+    if (!Array.isArray(payload) || payload.some((item) => typeof item !== 'string')) {
+      throw new Error('Python 工具服务返回了无效的工具列表');
+    }
+    return payload;
+  } catch (reason) {
+    const detail = reason instanceof Error ? reason.message : String(reason);
+    throw new Error(
+      detail.startsWith('Python 工具服务')
+        ? detail
+        : `Python 工具服务不可用：${detail || '未知错误'}`,
+    );
   } finally {
     done();
   }

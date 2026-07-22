@@ -1,25 +1,25 @@
 """
 llm-calling 工具：在 Python 服务端代理调用 LLM API（无 CORS 限制）。
 params:
+  action     (str, 可选) "chat"（默认）| "list_models"
   api        (str, 必填) "openai" | "anthropic" | "gemini"
   base_url   (str, 必填) API baseURL（须通过 SSRF 白名单或域名校验）
   api_key    (str, 必填) 密钥（由 Agent Runner 在调用时传入，不落盘）
   model      (str, 必填) 模型 ID
   messages   (list, 必填) 消息列表 [{ role, content }]（最多 200 轮）
   system     (str, 可选) 系统提示词
-  max_tokens (int, 可选) 最大回复 token 数，默认 4096，上限 16384
+  max_tokens (int, 可选) 最大回复 token 数，默认 4096，上限 30000
   temperature(float, 可选) 采样温度，范围 0-2
 """
-import ipaddress
 import asyncio
 import json
 import logging
-import socket
 import time
 from typing import Any
-from urllib.parse import urlparse
 
 import requests
+from network_policy import validate_model_base_url as _validate_base_url
+from safe_http import MODEL_POLICY, pinned_request
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # 必须同步升本版本号 + 前端 app/src/lib/pythonClient.ts 的 EXPECTED_PYTHON_SERVICE_VERSION,
 # 二者必须完全一致。否则 ensureCompatiblePythonService 无法识别旧后台、不触发强制重启,
 # 用户会跑着旧代码却以为功能坏了(如 Token 统计恒 0)。
-LLM_CALLING_VERSION = "2026-07-21.agent-node-options"
+LLM_CALLING_VERSION = "2026-07-22.code-audit"
 TIMEOUT = 300  # 秒
 CONNECT_TIMEOUT = 15
 MAX_RETRIES = 2
@@ -38,75 +38,9 @@ TRANSIENT_REQUEST_ERRORS = (
     requests.exceptions.ChunkedEncodingError,
 )
 
-# H2 修复：已知 LLM 厂商允许的域名白名单（与前端 providers.ts 保持同步）
-_ALLOWED_DOMAINS: set[str] = {
-    "dashscope.aliyuncs.com",
-    "open.bigmodel.cn",
-    "api.deepseek.com",
-    "api.moonshot.cn",
-    "api.minimax.chat",
-    "api.xiaomimimo.com",
-    "api.openai.com",
-    "api.anthropic.com",
-    "generativelanguage.googleapis.com",
-    "api.x.ai",
-    "api.siliconflow.cn",
-    "openrouter.ai",
-    "api.together.xyz",
-    # 允许 localhost 调试（仅限本机）
-    "localhost",
-    "127.0.0.1",
-}
-
 # L22 修复：max_tokens 上限
-MAX_TOKENS_LIMIT = 16_384
+MAX_TOKENS_LIMIT = 30_000
 MAX_MESSAGES = 200
-
-
-def _is_non_public_ip(ip_str: str) -> bool:
-    """返回 True 表示该 IP 不是可安全访问的公网单播地址。"""
-    try:
-        return not ipaddress.ip_address(ip_str).is_global
-    except ValueError:
-        return True
-
-
-def _validate_base_url(base_url: str) -> str:
-    """允许预设或用户明确配置的公网 HTTPS，以及显式 localhost 本地服务。"""
-    parsed = urlparse(base_url)
-    if parsed.username or parsed.password:
-        raise ValueError("base_url 不能包含用户名或密码")
-    if parsed.query or parsed.fragment:
-        raise ValueError("base_url 不能包含查询参数或片段")
-
-    hostname = (parsed.hostname or "").lower()
-    if not hostname:
-        raise ValueError("base_url 缺少主机名")
-    local_hosts = {"localhost", "127.0.0.1"}
-    is_local = hostname in local_hosts
-    if parsed.scheme != "https" and not (parsed.scheme == "http" and is_local):
-        raise ValueError("自定义模型仅允许公网 HTTPS 地址；HTTP 只允许 localhost 本地服务")
-
-    if is_local:
-        return base_url.rstrip("/")
-
-    try:
-        port = parsed.port or 443
-        addresses = {
-            item[4][0]
-            for item in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-        }
-    except (socket.gaierror, ValueError) as exc:
-        raise ValueError(f"base_url 主机名 '{hostname}' 无法解析") from exc
-
-    if not addresses:
-        raise ValueError(f"base_url 主机名 '{hostname}' 没有可用 IP")
-    blocked = next((ip for ip in addresses if _is_non_public_ip(ip)), None)
-    if blocked:
-        raise ValueError(
-            f"拒绝访问私网、回环、链路本地或保留地址 '{hostname}' ({blocked})，防止 SSRF 攻击。"
-        )
-    return base_url.rstrip("/")
 
 
 def _is_transient_error(exc: BaseException) -> bool:
@@ -133,8 +67,10 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> di
         payload_kb = 0
     for attempt in range(MAX_RETRIES + 1):
         try:
-            resp = requests.post(
+            with pinned_request(
+                "POST",
                 url,
+                policy=MODEL_POLICY,
                 headers={
                     **headers,
                     "Content-Type": "application/json",
@@ -144,15 +80,14 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> di
                 },
                 json=payload,
                 timeout=(CONNECT_TIMEOUT, TIMEOUT),
-                allow_redirects=False,
-            )
-            if 300 <= resp.status_code < 400:
-                raise RuntimeError("LLM 服务返回重定向，已拒绝跟随以防止凭据泄露")
-            resp.raise_for_status()
-            try:
-                return resp.json()
-            except ValueError as exc:
-                raise RuntimeError("LLM 返回内容不是合法 JSON，请稍后重试或检查模型服务状态") from exc
+            ) as resp:
+                if 300 <= resp.status_code < 400:
+                    raise RuntimeError("LLM 服务返回重定向，已拒绝跟随以防止凭据泄露")
+                resp.raise_for_status()
+                try:
+                    return resp.json()
+                except ValueError as exc:
+                    raise RuntimeError("LLM 返回内容不是合法 JSON，请稍后重试或检查模型服务状态") from exc
         except requests.HTTPError as exc:
             last_exc = exc
             status = exc.response.status_code if exc.response is not None else 0
@@ -189,6 +124,46 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> di
         "模型配置的短测试通过不代表长输入/长输出任务一定稳定；"
         f"本次请求体约 {payload_kb}KB。请稍后重试，或换用更稳定/更大上下文的模型。"
     ) from last_exc
+
+
+def _list_models(base_url: str, api_key: str, api: str) -> list[str]:
+    headers = (
+        {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+        if api == "anthropic"
+        else {"Authorization": f"Bearer {api_key}"}
+    )
+    with pinned_request(
+        "GET",
+        f"{base_url}/models",
+        policy=MODEL_POLICY,
+        headers={**headers, "Accept-Encoding": "identity"},
+        timeout=(CONNECT_TIMEOUT, TIMEOUT),
+    ) as resp:
+        if 300 <= resp.status_code < 400:
+            raise RuntimeError("LLM 服务返回重定向，已拒绝跟随以防止凭据泄露")
+        resp.raise_for_status()
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise RuntimeError("LLM 返回内容不是合法 JSON，请稍后重试或检查模型服务状态") from exc
+
+    raw_models = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(raw_models, list) and isinstance(data, dict):
+        raw_models = data.get("models")
+    if not isinstance(raw_models, list):
+        raise ValueError("返回格式无法解析：缺少模型列表")
+
+    models: list[str] = []
+    for item in raw_models:
+        value = item if isinstance(item, str) else None
+        if isinstance(item, dict):
+            value = item.get("id") or item.get("name")
+        if isinstance(value, str) and value:
+            models.append(value)
+    return models
 
 
 def _call_openai(base_url: str, api_key: str, model: str,
@@ -258,6 +233,7 @@ def _call_anthropic(base_url: str, api_key: str, model: str,
 
 
 async def execute(params: dict[str, Any]) -> Any:
+    action: str = params.get("action", "chat")
     api: str = params.get("api", "openai")
     base_url_raw: str = params.get("base_url", "")
     api_key: str = params.get("api_key", "")
@@ -265,28 +241,36 @@ async def execute(params: dict[str, Any]) -> Any:
     messages: list = params.get("messages", [])
     system: str | None = params.get("system")
 
-    # L22 修复：max_tokens 上限
-    max_tokens: int = min(int(params.get("max_tokens", 4096)), MAX_TOKENS_LIMIT)
-    temperature_raw = params.get("temperature")
-    temperature: float | None = None
-    if temperature_raw is not None:
-        temperature = min(2.0, max(0.0, float(temperature_raw)))
-
     if not base_url_raw:
         raise ValueError("缺少必填参数 base_url")
     if not api_key:
         raise ValueError("缺少必填参数 api_key")
-    if not model:
-        raise ValueError("缺少必填参数 model")
-    if not messages:
-        raise ValueError("缺少必填参数 messages")
-    if len(messages) > MAX_MESSAGES:
-        raise ValueError(f"messages 超过 {MAX_MESSAGES} 轮上限")
+    if action not in {"chat", "list_models"}:
+        raise ValueError(f"不支持的 action: {action}")
 
     # H2：SSRF 防护校验
     base_url = _validate_base_url(base_url_raw)
 
+    if action == "chat":
+        if not model:
+            raise ValueError("缺少必填参数 model")
+        if not messages:
+            raise ValueError("缺少必填参数 messages")
+        if len(messages) > MAX_MESSAGES:
+            raise ValueError(f"messages 超过 {MAX_MESSAGES} 轮上限")
+
     try:
+        if action == "list_models":
+            models = await asyncio.to_thread(_list_models, base_url, api_key, api)
+            return {"models": models}
+
+        # L22 修复：max_tokens 上限
+        max_tokens: int = min(int(params.get("max_tokens", 4096)), MAX_TOKENS_LIMIT)
+        temperature_raw = params.get("temperature")
+        temperature: float | None = None
+        if temperature_raw is not None:
+            temperature = min(2.0, max(0.0, float(temperature_raw)))
+
         if api == "anthropic":
             reply, total_tokens = await asyncio.to_thread(
                 _call_anthropic,

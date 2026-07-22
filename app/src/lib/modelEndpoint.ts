@@ -35,6 +35,14 @@ function isForbiddenIpv4(hostname: string): boolean {
 function isForbiddenIpv6(hostname: string): boolean {
   if (!hostname.includes(':')) return false;
   const lower = hostname.toLowerCase();
+  const nat64 = lower.match(/^64:ff9b::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u);
+  if (nat64) {
+    const high = Number.parseInt(nat64[1], 16);
+    const low = Number.parseInt(nat64[2], 16);
+    return isForbiddenIpv4(
+      `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`,
+    );
+  }
   return (
     lower === '::' ||
     lower === '::1' ||

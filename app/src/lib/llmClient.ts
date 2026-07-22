@@ -1,15 +1,10 @@
-// 唯一联网出入口(LLM 请求)。桌面端(Tauri)用插件 fetch 在 Rust 侧发请求,绕开 WebView 的浏览器同源/CORS 限制
-// (多数 LLM 厂商接口不支持浏览器 CORS 预检,纯浏览器预览下仍会被拦截,属已知限制)。
+// LLM 请求统一经 Python llm-calling 发出，由固定 IP 连接层执行 SSRF 防护。
 
-import { isTauri } from '@tauri-apps/api/core';
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import type { ProviderApi } from './providers';
 import { createTimeoutSignal } from './abortUtils'; // M1：消除重复超时信号逻辑
 import { ensureCompatiblePythonService, executeTool, unwrapToolResult } from './pythonClient';
 import { useTokenStatsStore, type JiziScene } from '../stores/tokenStatsStore';
 import { validateModelBaseUrl } from './modelEndpoint';
-
-const httpFetch: typeof fetch = isTauri() ? (tauriFetch as typeof fetch) : fetch;
 
 export const LATENCY_LOW = 1000; // <1s 低延迟(绿)
 export const TIMEOUT = 10000; // 探活/取列表:>10s 视为超时(红)
@@ -23,28 +18,8 @@ export interface LLMConfig {
 
 export type TestStatus = 'ok-low' | 'ok-high' | 'fail';
 
-function authHeaders(cfg: LLMConfig): Record<string, string> {
-  if (cfg.api === 'anthropic') {
-    return {
-      'x-api-key': cfg.apiKey,
-      'anthropic-version': '2023-06-01',
-    };
-  }
-  // openai / gemini(OpenAI 兼容端点)统一 Bearer
-  return { Authorization: `Bearer ${cfg.apiKey}` };
-}
-
 function trimBase(baseURL: string): string {
   return baseURL.replace(/\/+$/, '');
-}
-
-async function withTimeout(url: string, init: RequestInit): Promise<Response> {
-  const { signal, done } = createTimeoutSignal(TIMEOUT);
-  try {
-    return await httpFetch(url, { ...init, signal });
-  } finally {
-    done();
-  }
 }
 
 // 获取模型列表
@@ -53,62 +28,26 @@ export async function listModels(cfg: LLMConfig): Promise<string[]> {
   if (!base) throw new Error('缺少 baseURL');
   if (!cfg.apiKey) throw new Error('缺少密钥');
 
-  const url = `${base}/models`;
-  const res = await withTimeout(url, {
-    method: 'GET',
-    redirect: 'error',
-    headers: authHeaders(cfg),
-  });
-  if (!res.ok) {
-    throw new Error(`请求失败 (${res.status})`);
-  }
-  const data = await res.json();
-  // OpenAI/Anthropic/Gemini 兼容端点均返回 { data: [{ id }] }
-  const list = Array.isArray(data?.data) ? data.data : data?.models;
-  if (!Array.isArray(list)) throw new Error('返回格式无法解析');
-  return list
-    .map((m: unknown) =>
-      typeof m === 'string'
-        ? m
-        : (m as { id?: string; name?: string })?.id ??
-          (m as { name?: string })?.name ??
-          '',
-    )
-    .filter((id: string) => !!id);
-}
-
-async function errorText(res: Response): Promise<string> {
-  let detail = '';
+  await ensureCompatiblePythonService();
+  const { signal, done } = createTimeoutSignal(TIMEOUT);
   try {
-    const body = await res.text();
-    if (body) {
-      try {
-        const j = JSON.parse(body);
-        const raw =
-          j?.error?.message ??
-          j?.error?.detail ??
-          j?.error ??
-          j?.message ??
-          j?.detail ??
-          j?.reason ??
-          j?.code ??
-          '';
-        detail =
-          typeof raw === 'string'
-            ? raw
-            : raw
-              ? JSON.stringify(raw)
-              : body.slice(0, 500);
-      } catch {
-        detail = body.slice(0, 500);
-      }
+    const res = await executeTool('llm-calling', {
+      action: 'list_models',
+      api: cfg.api,
+      base_url: base,
+      api_key: cfg.apiKey,
+    }, signal);
+    const result = unwrapToolResult<{ models?: unknown }>(res, '获取模型列表失败');
+    if (
+      !Array.isArray(result.models) ||
+      result.models.some((model) => typeof model !== 'string')
+    ) {
+      throw new Error('返回格式无法解析');
     }
-  } catch {
-    /* 无 body,忽略 */
+    return result.models;
+  } finally {
+    done();
   }
-  return detail
-    ? `请求失败 (${res.status}): ${detail}`
-    : `请求失败 (${res.status})`;
 }
 
 // 随消息一起发送的图片(base64,不含 data: 前缀)
@@ -134,7 +73,7 @@ export interface ChatParams {
   scene: JiziScene; // 姬子调用场景,用于 token 按场景统计(必填)
 }
 
-const MAX_TOKENS = 4096; // anthropic 必填,openai/gemini 忽略
+const MAX_TOKENS = 30000; // anthropic 必填,openai/gemini 忽略
 
 // 单轮对话(非流式)。三协议统一入口:anthropic 走 /messages;openai/gemini 兼容端点走 /chat/completions。
 // 图片走各协议的多模态 content 块。取消由外部 signal 驱动。
@@ -147,62 +86,25 @@ export async function chat(params: ChatParams): Promise<string> {
 
   const { signal: reqSignal, done } = createTimeoutSignal(CHAT_TIMEOUT, signal);
   try {
+    await ensureCompatiblePythonService();
+    let messages: unknown[];
+    let systemPayload: unknown;
     if (cfg.api === 'anthropic') {
       const content: unknown[] = images.map((img) => ({
         type: 'image',
         source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
       }));
       content.push({ type: 'text', text });
-      const res = await httpFetch(`${base}/messages`, {
-        method: 'POST',
-        redirect: 'error',
-        headers: {
-          ...authHeaders(cfg),
-          'content-type': 'application/json',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: MAX_TOKENS,
-          // 人格提示词是每轮几乎不变的稳定前缀,标记 cache_control 后第二轮起按 ~10% 计费;
-          // 块过短(<最小可缓存 token)时厂商会静默跳过缓存,不会报错。
-          ...(system
-            ? {
-                system: [
-                  {
-                    type: 'text',
-                    text: system,
-                    cache_control: { type: 'ephemeral' },
-                  },
-                ],
-              }
-            : {}),
-          messages: [
-            ...history.map((t) => ({ role: t.role, content: t.content })),
-            { role: 'user', content },
-          ],
-        }),
-        signal: reqSignal,
-      });
-      if (!res.ok) throw new Error(await errorText(res));
-      const data = await res.json();
-      const blocks: Array<{ type?: string; text?: string }> = Array.isArray(
-        data?.content,
-      )
-        ? data.content
-        : [];
-      const out = blocks
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text ?? '')
-        .join('');
-      // Token 用量:anthropic 无 total 字段,input+output 相加。chat() 现所有调用点都是姬子侧,计入总控。
-      recordChatUsage(model, (data?.usage?.input_tokens ?? 0) + (data?.usage?.output_tokens ?? 0), scene);
-      return out || '(空回复)';
-    }
-
-    // openai / gemini(OpenAI 兼容)
-    const userContent =
-      images.length > 0
+      messages = [
+        ...history.map((t) => ({ role: t.role, content: t.content })),
+        { role: 'user', content },
+      ];
+      // 人格提示词是稳定前缀，保留 Anthropic prompt cache 标记。
+      systemPayload = system
+        ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+        : undefined;
+    } else {
+      const userContent = images.length > 0
         ? [
             { type: 'text', text },
             ...images.map((img) => ({
@@ -211,24 +113,28 @@ export async function chat(params: ChatParams): Promise<string> {
             })),
           ]
         : text;
-    const messages: unknown[] = [];
-    if (system) messages.push({ role: 'system', content: system });
-    for (const t of history) messages.push({ role: t.role, content: t.content });
-    messages.push({ role: 'user', content: userContent });
-    const res = await httpFetch(`${base}/chat/completions`, {
-      method: 'POST',
-      redirect: 'error',
-      headers: { ...authHeaders(cfg), 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages }),
-      signal: reqSignal,
-    });
-    if (!res.ok) throw new Error(await errorText(res));
-    const data = await res.json();
-    const out = data?.choices?.[0]?.message?.content;
-    if (typeof out !== 'string') throw new Error('返回格式无法解析');
-    // Token 用量:openai 兼容端点取 usage.total_tokens。
-    recordChatUsage(model, data?.usage?.total_tokens ?? 0, scene);
-    return out;
+      messages = [];
+      if (system) messages.push({ role: 'system', content: system });
+      for (const turn of history) messages.push({ role: turn.role, content: turn.content });
+      messages.push({ role: 'user', content: userContent });
+    }
+
+    const res = await executeTool('llm-calling', {
+      api: cfg.api,
+      base_url: base,
+      api_key: cfg.apiKey,
+      model,
+      ...(systemPayload === undefined ? {} : { system: systemPayload }),
+      messages,
+      max_tokens: MAX_TOKENS,
+    }, reqSignal);
+    const result = unwrapToolResult<{
+      reply?: unknown;
+      usage?: { total?: unknown };
+    }>(res, '模型对话失败');
+    if (typeof result.reply !== 'string') throw new Error('返回格式无法解析');
+    recordChatUsage(model, result.usage?.total ?? 0, scene);
+    return result.reply;
   } finally {
     done();
   }

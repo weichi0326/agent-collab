@@ -18,14 +18,14 @@ describe('agent node capability defaults', () => {
       selectionMode: 'all',
       selectedUpstreamIds: [],
       upstreamOrder: [],
-      contentMode: 'legacy',
+      contentMode: 'full',
       includeSupplementalSources: false,
       maxInputChars: 120000,
       oversizeStrategy: 'error',
     });
     expect(generationCapability(undefined)).toEqual({
       enabled: false,
-      maxTokens: 4096,
+      maxTokens: 30000,
       temperature: null,
       fallbackModelRef: null,
       retryOnEmpty: true,
@@ -49,7 +49,7 @@ describe('agent node capability defaults', () => {
   it('clamps malformed imported values to supported ranges', () => {
     expect(generationCapability({ enabled: true, maxTokens: 99999, temperature: -1 })).toMatchObject({
       enabled: true,
-      maxTokens: 16384,
+      maxTokens: 30000,
       temperature: 0,
     });
     expect(executionCapability({ enabled: true, retryCount: 9, timeoutSeconds: 2 })).toMatchObject({
@@ -60,7 +60,7 @@ describe('agent node capability defaults', () => {
   });
 
   it('only overrides model request settings while generation is enabled', () => {
-    expect(modelGenerationOptions(undefined)).toEqual({ maxTokens: 4096 });
+    expect(modelGenerationOptions(undefined)).toEqual({ maxTokens: 30000 });
     expect(modelGenerationOptions({
       enabled: true,
       maxTokens: 8192,

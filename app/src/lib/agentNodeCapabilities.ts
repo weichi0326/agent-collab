@@ -9,7 +9,7 @@ import type {
 export const INPUT_CHAR_LIMIT_MIN = 1000;
 export const INPUT_CHAR_LIMIT_MAX = 500000;
 export const NODE_MAX_TOKENS_MIN = 512;
-export const NODE_MAX_TOKENS_MAX = 16384;
+export const NODE_MAX_TOKENS_MAX = 30000;
 export const NODE_TIMEOUT_SECONDS_MIN = 30;
 export const NODE_TIMEOUT_SECONDS_MAX = 300;
 
@@ -40,12 +40,11 @@ export function inputCapability(
 ): Required<NodeInputCapability> {
   const selectionMode = value?.selectionMode === 'selected' ? 'selected' : 'all';
   const contentMode =
-    value?.contentMode === 'smart' ||
     value?.contentMode === 'structured' ||
     value?.contentMode === 'summary' ||
     value?.contentMode === 'full'
       ? value.contentMode
-      : 'legacy';
+      : 'full';
   const oversizeStrategy =
     value?.oversizeStrategy === 'truncate' || value?.oversizeStrategy === 'summarize'
       ? value.oversizeStrategy
@@ -79,7 +78,7 @@ export function generationCapability(
     enabled: value?.enabled === true,
     maxTokens: clampInteger(
       value?.maxTokens,
-      4096,
+      NODE_MAX_TOKENS_MAX,
       NODE_MAX_TOKENS_MIN,
       NODE_MAX_TOKENS_MAX,
     ),
@@ -98,7 +97,7 @@ export function modelGenerationOptions(
   value: Partial<NodeGenerationCapability> | undefined,
 ): { maxTokens: number; temperature?: number } {
   const config = generationCapability(value);
-  if (!config.enabled) return { maxTokens: 4096 };
+  if (!config.enabled) return { maxTokens: NODE_MAX_TOKENS_MAX };
   return {
     maxTokens: config.maxTokens,
     ...(config.temperature === null ? {} : { temperature: config.temperature }),

@@ -10,7 +10,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const MAX_RESTARTS: u8 = 3;
 const PYTHON_PORT: &str = "18081";
 const PYTHON_HOST: &str = "127.0.0.1";
 
@@ -46,11 +45,10 @@ const PYTHON_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 #[derive(Default)]
 pub struct PythonState {
     child: Option<Child>,
-    restart_attempts: u8,
     user_tools_dir: Option<PathBuf>,
 }
 
-/// Tauri managed state：持有 Python 子进程的句柄与重启计数。
+/// Tauri managed state：持有 Python 子进程句柄和用户工具目录。
 pub struct PythonProcess(pub Mutex<PythonState>);
 
 pub fn configure_user_tools_dir(state: &PythonProcess, dir: PathBuf) -> Result<(), String> {
@@ -79,12 +77,16 @@ fn is_forbidden_ipv4(ip: Ipv4Addr) -> bool {
 
 fn is_forbidden_ipv6(ip: Ipv6Addr) -> bool {
     let segments = ip.segments();
+    let octets = ip.octets();
+    let nat64_ipv4 = (octets[..12] == [0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0])
+        .then(|| Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]));
     ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_multicast()
         || (segments[0] & 0xfe00) == 0xfc00
         || (segments[0] & 0xffc0) == 0xfe80
         || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+        || nat64_ipv4.is_some_and(is_forbidden_ipv4)
         || ip.to_ipv4().is_some_and(is_forbidden_ipv4)
 }
 
@@ -569,10 +571,6 @@ pub fn stop(state: &PythonProcess) {
 pub fn restart(state: &PythonProcess) -> Result<bool, String> {
     stop(state);
     stop_orphan_python_listeners();
-    {
-        let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
-        guard.restart_attempts = 0;
-    }
     start(state)
 }
 
@@ -586,6 +584,10 @@ pub fn service_token_cmd() -> String {
 
 #[tauri::command]
 pub fn python_status(state: tauri::State<'_, PythonProcess>) -> String {
+    process_status(&state)
+}
+
+fn process_status(state: &PythonProcess) -> String {
     // M5 修复：Mutex 中毒容错
     let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(child) = guard.child.as_mut() {
@@ -601,21 +603,7 @@ pub fn python_status(state: tauri::State<'_, PythonProcess>) -> String {
             }
         }
     }
-
-    if guard.restart_attempts >= MAX_RESTARTS {
-        return "stopped".to_string();
-    }
-    guard.restart_attempts += 1;
-    drop(guard);
-
-    match start(&state) {
-        Ok(true) => "running".to_string(),
-        Ok(false) => "stopped".to_string(),
-        Err(e) => {
-            log::error!("[python_manager] Python 服务自动重启失败: {e}");
-            "stopped".to_string()
-        }
-    }
+    "stopped".to_string()
 }
 
 #[tauri::command]
@@ -638,6 +626,14 @@ mod tests {
                 r#""{executable}" -m uvicorn app:app --host 127.0.0.1 --port 18081 --app-dir "{app_dir}" --log-level warning"#
             ),
         }
+    }
+
+    #[test]
+    fn process_status_without_child_is_stopped() {
+        let state = PythonProcess(Mutex::new(PythonState::default()));
+
+        assert_eq!(process_status(&state), "stopped");
+        assert!(state.0.lock().unwrap().child.is_none());
     }
 
     #[test]
@@ -705,5 +701,21 @@ mod tests {
         assert!(validate_model_host_inner("127.0.0.1", 8000, false).is_err());
         assert!(validate_model_host_inner("192.168.1.10", 443, false).is_err());
         assert!(validate_model_host_inner("8.8.8.8", 443, false).is_ok());
+    }
+
+    #[test]
+    fn model_ip_policy_matches_shared_cases() {
+        let raw = include_str!("../../../security/ssrf-policy-cases.json");
+        let policy: serde_json::Value = serde_json::from_str(raw).unwrap();
+        for item in policy["ipAddresses"].as_array().unwrap() {
+            let address = item["address"].as_str().unwrap();
+            let expected_public = item["public"].as_bool().unwrap();
+            let ip: IpAddr = address.parse().unwrap();
+            assert_eq!(
+                !is_forbidden_model_ip(ip),
+                expected_public,
+                "shared SSRF policy mismatch for {address}"
+            );
+        }
     }
 }

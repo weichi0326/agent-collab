@@ -976,9 +976,7 @@ function PropertiesPanel() {
                       enabled={inputConfig.enabled}
                       summary={inputConfig.enabled
                         ? `${inputConfig.selectionMode === 'all' ? '全部上游' : '指定上游'} · ${{
-                            legacy: '兼容模式',
-                            smart: '智能选择',
-                            structured: '结构化',
+                            structured: '结构化内容',
                             summary: '摘要',
                             full: '完整正文',
                           }[inputConfig.contentMode]}`
@@ -1076,11 +1074,9 @@ function PropertiesPanel() {
                               disabled={readOnly}
                               value={inputConfig.contentMode}
                               options={[
-                                { label: '兼容旧模式', value: 'legacy' },
-                                { label: '智能选择', value: 'smart' },
-                                { label: '仅结构化内容', value: 'structured' },
-                                { label: '仅摘要', value: 'summary' },
                                 { label: '完整正文', value: 'full' },
+                                { label: '摘要', value: 'summary' },
+                                { label: '结构化内容', value: 'structured' },
                               ]}
                               onChange={(contentMode) => patchCapability('input', { contentMode })}
                             />
@@ -1170,7 +1166,7 @@ function PropertiesPanel() {
                               disabled={readOnly}
                               value={generationConfig.maxTokens}
                               onChange={(maxTokens) => patchCapability('generation', {
-                                maxTokens: Number(maxTokens ?? 4096),
+                                maxTokens: Number(maxTokens ?? NODE_MAX_TOKENS_MAX),
                               })}
                             />
                           </div>

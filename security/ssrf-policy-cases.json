@@ -1,0 +1,33 @@
+{
+  "modelBaseUrls": [
+    { "url": "https://llm.example.com/v1", "allowed": true },
+    { "url": "http://localhost:11434/v1", "allowed": true },
+    { "url": "http://127.0.0.1:8000/v1", "allowed": true },
+    { "url": "http://llm.example.com/v1", "allowed": false },
+    { "url": "https://10.0.0.8/v1", "allowed": false },
+    { "url": "https://[64:ff9b::a00:1]/v1", "allowed": false },
+    { "url": "https://[64:ff9b::5db8:d822]/v1", "allowed": true },
+    { "url": "https://user:pass@llm.example.com/v1", "allowed": false },
+    { "url": "https://llm.example.com/v1?token=secret", "allowed": false }
+  ],
+  "publicUrls": [
+    { "url": "https://example.test/page", "resolvedIp": "93.184.216.34", "allowed": true },
+    { "url": "http://example.test/page", "resolvedIp": "93.184.216.34", "allowed": true },
+    { "url": "http://localhost/admin", "resolvedIp": "127.0.0.1", "allowed": false },
+    { "url": "https://example.test/admin", "resolvedIp": "10.0.0.8", "allowed": false },
+    { "url": "https://example.test/admin", "resolvedIp": "64:ff9b::a00:1", "allowed": false },
+    { "url": "http://user:pass@example.test/page", "resolvedIp": "93.184.216.34", "allowed": false }
+  ],
+  "ipAddresses": [
+    { "address": "93.184.216.34", "public": true },
+    { "address": "10.0.0.8", "public": false },
+    { "address": "127.0.0.1", "public": false },
+    { "address": "169.254.1.1", "public": false },
+    { "address": "2001:4860:4860::8888", "public": true },
+    { "address": "::1", "public": false },
+    { "address": "fc00::1", "public": false },
+    { "address": "2001:db8::1", "public": false },
+    { "address": "64:ff9b::a00:1", "public": false },
+    { "address": "64:ff9b::5db8:d822", "public": true }
+  ]
+}

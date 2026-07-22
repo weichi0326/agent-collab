@@ -11,6 +11,8 @@ const REQUIRED_FILES = [
   'runtime/python.exe',
   'app.py',
   'requirements.txt',
+  'network_policy.py',
+  'safe_http.py',
   'tools/router.py',
   'tools/dynamic.py',
   'tools/installer.py',

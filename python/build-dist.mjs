@@ -149,7 +149,7 @@ async function copyAppCode() {
   log('拷贝 app 代码（app.py + tools/ + requirements.txt）…');
   await fs.copyFile(path.join(PYTHON_SRC, 'app.py'), path.join(DIST, 'app.py'));
   await fs.copyFile(REQUIREMENTS, path.join(DIST, 'requirements.txt'));
-  for (const module of ['web_reader.py', 'web_reader_policy.py']) {
+  for (const module of ['network_policy.py', 'safe_http.py', 'web_reader.py', 'web_reader_policy.py']) {
     await fs.copyFile(path.join(PYTHON_SRC, module), path.join(DIST, module));
   }
 
