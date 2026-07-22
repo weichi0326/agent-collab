@@ -67,7 +67,7 @@ cargo clippy -- -D warnings
 app/                       前端 + Tauri + Rust 桌面端源码
 python/                    Python FastAPI 后端、工具、测试
 jizi-agent-architecture/   姬子人格与 Skill 架构文件
-docs/                      辅助文档（审计待办 / 错误总结 / 拆分规范）
+docs/                      仍在使用的工程规范与开发错误复盘
 data/ outputs/ logs/       运行数据、产物、日志（不入库）
 ```
 
@@ -80,7 +80,7 @@ data/ outputs/ logs/       运行数据、产物、日志（不入库）
 
 ## 更多文档
 
-- [开发清单.md](开发清单.md) — 功能全景、技术栈、开发时间线、待办
-- [交接注意事项.md](交接注意事项.md) — 迁移、启动、打包发版、关键约束
-- [JIZI_INTELLIGENCE_REVIEW.md](JIZI_INTELLIGENCE_REVIEW.md) — 姬子能力审查与问题基线
-- [JIZI_INTELLIGENCE_UPGRADE_REPORT.md](JIZI_INTELLIGENCE_UPGRADE_REPORT.md) — 受控自主升级范围、验证证据与剩余限制
+- [qa-test-cases.md](qa-test-cases.md) — 用户主流程与边界场景的人工验收用例
+- [docs/模块化拆分规范.md](docs/模块化拆分规范.md) — 当前模块归属和拆分规则
+- [docs/开发错误总结-2026-07-07.md](docs/开发错误总结-2026-07-07.md) — 仍适用的历史缺陷与防回归经验
+- [项目审计报告.md](项目审计报告.md) — 以当前源码和实际验证结果为准的问题清单
