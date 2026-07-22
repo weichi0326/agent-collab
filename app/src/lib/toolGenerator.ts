@@ -1,4 +1,4 @@
-﻿import { asObject } from './jsonGuards';
+import { asObject } from './jsonGuards';
 import { chat, type LLMConfig } from './llmClient';
 import { cleanJsonFence } from './masterPlanner';
 import { buildJiziSkillSystemBlock } from './jiziSkills';
@@ -77,16 +77,6 @@ function buildGeneratorPrompt(requirement: string, runtimeContext?: string): str
   ]
     .filter(Boolean)
     .join('\n');
-}
-
-export interface GeneratedTool {
-  name: string;
-  description: string;
-  tags: string[];
-  dependencies: string[];
-  implementation: ToolMetaImplementation;
-  capabilities: ToolMetaCapability[];
-  code: string;
 }
 
 /**

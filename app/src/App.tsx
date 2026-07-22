@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { App as AntdApp, Button, Result, Spin } from 'antd';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -11,11 +11,8 @@ import PropertiesPanel from './components/PropertiesPanel';
 import MasterAgentDrawer from './components/MasterAgentDrawer';
 import AgentConfigModal from './components/AgentConfigModal';
 import CommandPalette from './components/CommandPalette';
-import ReportCenter from './components/ReportCenter/ReportCenter';
 import JiziCommandCenter from './components/JiziCommandCenter';
-import SettingsCenter, {
-  LiveAnnouncement,
-} from './components/SettingsCenter/SettingsCenter';
+import LiveAnnouncement from './components/LiveAnnouncement';
 import OnboardingController from './components/Onboarding/OnboardingController';
 import JiziSideDock from './components/MasterAgentPanel/JiziSideDock';
 import { effectiveJiziPlacement, shouldRenderSideProperties } from './components/jiziLayout';
@@ -33,6 +30,11 @@ import { useJiziSkillSettingsStore } from './stores/jiziSkillStore';
 import { useOnboardingStore } from './onboarding/onboardingStore';
 import { appViewLabel, workspaceLayerState } from './settings/appView';
 import './App.css';
+
+const ReportCenter = lazy(() => import('./components/ReportCenter/ReportCenter'));
+const SettingsCenter = lazy(
+  () => import('./components/SettingsCenter/SettingsCenter'),
+);
 
 // 桌面端 persist 从项目内 JSON 异步读盘,首帧数据为空。等所有 store 完成 hydration
 // 再渲染主体,避免空态闪烁与 ensureCanvas 竞态(浏览器 localStorage 兜底为同步,几乎瞬时就绪)。
@@ -218,12 +220,16 @@ function App() {
       )}
       {view === 'reports' && (
         <div className="app-body app-body--reports pearl-page-enter">
-          <ReportCenter refreshToken={reportRefreshToken} />
+          <Suspense fallback={<Spin description="加载报告中心…" />}>
+            <ReportCenter refreshToken={reportRefreshToken} />
+          </Suspense>
         </div>
       )}
       {view === 'settings' && (
         <div className="app-view-stage pearl-page-enter">
-          <SettingsCenter />
+          <Suspense fallback={<Spin description="加载设置…" />}>
+            <SettingsCenter />
+          </Suspense>
         </div>
       )}
       <AgentConfigModal />

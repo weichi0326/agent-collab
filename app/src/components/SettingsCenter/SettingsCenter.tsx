@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type CSSProperties,
   type Ref,
 } from 'react';
 import { App, Input, type InputRef } from 'antd';
@@ -30,6 +29,7 @@ import { JiziSettingsPanel } from '../MasterConfigModal';
 import { ToolSettingsPanel } from '../ToolConfigModal';
 import SystemDataSettingsPanel from './SystemDataSettingsPanel';
 import SettingsPanelErrorBoundary from './SettingsPanelErrorBoundary';
+import LiveAnnouncement from '../LiveAnnouncement';
 
 const GROUPS: SettingsGroup[] = ['AI 能力', '姬子', '扩展', '系统'];
 
@@ -41,18 +41,6 @@ const ICONS = {
   system: <DatabaseOutlined />,
 } satisfies Record<SettingsSection, React.ReactNode>;
 
-const VISUALLY_HIDDEN_STYLE: CSSProperties = {
-  position: 'absolute',
-  width: 1,
-  height: 1,
-  padding: 0,
-  margin: -1,
-  overflow: 'hidden',
-  clip: 'rect(0, 0, 0, 0)',
-  whiteSpace: 'nowrap',
-  border: 0,
-};
-
 interface FocusTarget {
   focus: () => void;
 }
@@ -63,19 +51,6 @@ export function focusSettingsEntry(
   pageHeading: FocusTarget | null,
 ): void {
   (searchInput ?? pageHeading)?.focus();
-}
-
-export function LiveAnnouncement({ message }: { message: string }) {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      style={VISUALLY_HIDDEN_STYLE}
-    >
-      {message}
-    </div>
-  );
 }
 
 interface SettingsCenterNavigationProps {

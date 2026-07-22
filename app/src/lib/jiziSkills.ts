@@ -339,16 +339,6 @@ export function parseSkillSelectionReply(
   return selected;
 }
 
-export async function selectJiziSkills(
-  text: string,
-  cfg: LLMConfig,
-  model: string,
-  signal?: AbortSignal,
-  limit?: number,
-): Promise<SelectedJiziSkill[]> {
-  return (await selectJiziSkillsDetailed(text, cfg, model, signal, limit)).selected;
-}
-
 async function selectJiziSkillsDetailed(
   text: string,
   cfg: LLMConfig,

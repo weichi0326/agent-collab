@@ -6,7 +6,6 @@ import {
   canSkipOnboarding,
   createInitialOnboardingState,
   canAdvanceModelSetupStep,
-  hasValidatedModel,
   tutorialMilestones,
 } from './onboardingState';
 
@@ -42,52 +41,6 @@ describe('onboarding state', () => {
     expect(third.welcomePage).toBe(2);
     expect(setup).toMatchObject({ status: 'active', stage: 'models' });
     expect(canSkipOnboarding(setup)).toBe(true);
-  });
-
-  it('accepts only a successful provider with an enabled model', () => {
-    expect(
-      hasValidatedModel([
-        provider({
-          models: [
-            {
-              id: 'model-a',
-              enabled: true,
-              caps: { longContext: false, vision: false, audio: false },
-            },
-          ],
-          test: { status: 'ok-low' },
-        }),
-      ]),
-    ).toBe(true);
-
-    expect(
-      hasValidatedModel([
-        provider({
-          models: [
-            {
-              id: 'model-a',
-              enabled: false,
-              caps: { longContext: false, vision: false, audio: false },
-            },
-          ],
-          test: { status: 'ok-high' },
-        }),
-      ]),
-    ).toBe(false);
-    expect(
-      hasValidatedModel([
-        provider({
-          models: [
-            {
-              id: 'model-a',
-              enabled: true,
-              caps: { longContext: false, vision: false, audio: false },
-            },
-          ],
-          test: { status: 'fail' },
-        }),
-      ]),
-    ).toBe(false);
   });
 
   it('does not let another saved provider unlock the active model setup flow', () => {

@@ -19,12 +19,12 @@ vi.mock('./SystemDataSettingsPanel', () => ({
 }));
 
 import {
+  default as SettingsCenter,
   focusSettingsEntry,
-  LiveAnnouncement,
   SettingsCenterNavigation,
   SettingsCenterPanel,
 } from './SettingsCenter';
-import SettingsCenter from './SettingsCenter';
+import LiveAnnouncement from '../LiveAnnouncement';
 
 describe('settings center navigation', () => {
   it('focuses the search field before falling back to the page heading', () => {

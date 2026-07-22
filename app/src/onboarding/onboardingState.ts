@@ -32,14 +32,6 @@ export function advanceWelcome(
   return { ...state, status: 'active', stage: 'models' };
 }
 
-export function hasValidatedModel(configs: ProviderConfig[]): boolean {
-  return configs.some(
-    (config) =>
-      (config.test.status === 'ok-low' || config.test.status === 'ok-high') &&
-      config.models.some((model) => model.enabled),
-  );
-}
-
 export interface ModelSetupTargetState {
   credentialsVisible: boolean;
   credentialsConfigId: string | null;
