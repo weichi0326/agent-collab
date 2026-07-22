@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { App, Button, Drawer, Input, Modal, Segmented, Tag, Tooltip } from 'antd';
+import { App, Button, Drawer, Input, Modal, Result, Segmented, Spin, Tag, Tooltip } from 'antd';
 import {
   ApartmentOutlined,
   ArrowLeftOutlined,
@@ -24,6 +24,15 @@ import {
   SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
+import {
+  chaptersForProject,
+  countFictionWords,
+  projectWordCount,
+  type FictionChapterStatus,
+  type FictionProject,
+  type FictionistIndex,
+} from '../../features/fictionist/domain';
+import { useFictionistStore } from '../../features/fictionist/fictionistStore';
 import './FictionistWorkspace.css';
 
 type FictionistSection = 'library' | 'chapters' | 'canon' | 'timeline' | 'workflows';
@@ -31,100 +40,35 @@ type ProjectSection = Exclude<FictionistSection, 'library'>;
 type EditorMode = 'edit' | 'preview';
 type InspectorMode = 'context' | 'checks';
 
-interface DemoBook {
-  id: string;
-  title: string;
-  genre: string;
-  status: '写作中' | '筹备中' | '已归档';
-  chapters: number;
-  words: number;
-  canonEntries: number;
-  updatedAt: string;
-  coverTone: 'teal' | 'blue' | 'red' | 'gold';
+const PROJECT_STATUS_LABELS = {
+  drafting: '写作中',
+  paused: '筹备中',
+  archived: '已归档',
+} as const;
+
+const CHAPTER_STATUS_LABELS = {
+  outline: '草稿',
+  draft: '草稿',
+  revised: '修改中',
+  final: '定稿',
+} as const;
+
+interface BookView extends FictionProject {
+  statusLabel: (typeof PROJECT_STATUS_LABELS)[FictionProject['status']];
+  chapterCount: number;
+  wordCount: number;
 }
 
-interface DemoChapter {
-  id: string;
-  index: number;
-  title: string;
-  status: '定稿' | '修改中' | '草稿';
-  words: number;
-  content: string;
+function bookViews(index: FictionistIndex): BookView[] {
+  return Object.values(index.projects)
+    .map((project) => ({
+      ...project,
+      statusLabel: PROJECT_STATUS_LABELS[project.status],
+      chapterCount: chaptersForProject(index, project.id).length,
+      wordCount: projectWordCount(index, project.id),
+    }))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
-
-const INITIAL_CHAPTERS: DemoChapter[] = [
-  {
-    id: 'chapter-1',
-    index: 1,
-    title: '潮声之外',
-    status: '定稿',
-    words: 3280,
-    content:
-      '港区停电后的第十七分钟，林砚终于听见了那封信里提到的钟声。\n\n声音从雾里传来，隔着废弃的引水渠，一下，又一下。码头所有机械钟都停在凌晨两点十四分，只有旧海关塔顶的铜钟仍在走。\n\n她把信纸折回原样，塞进外套内袋。纸角擦过指尖时，留下了一点潮湿的蓝色墨迹。寄信人知道她会来，也知道今晚不会有船靠岸。',
-  },
-  {
-    id: 'chapter-2',
-    index: 2,
-    title: '没有靠岸的船',
-    status: '修改中',
-    words: 2860,
-    content:
-      '林砚沿着防波堤向东走。雾把灯塔切成两截，上半截悬在黑暗里，像一枚没有落下的句号。\n\n值夜人老杜不在岗亭，桌上却摆着两杯刚泡好的茶。第二只杯子下面压着一张航道图，图上有一条不属于任何登记航线的红线。\n\n红线的终点，是三年前已经封闭的七号泊位。',
-  },
-  {
-    id: 'chapter-3',
-    index: 3,
-    title: '七号泊位',
-    status: '草稿',
-    words: 1140,
-    content:
-      '七号泊位的铁门没有上锁。\n\n林砚推门时，门轴发出的声音和信里那句“不要惊动守钟人”同时浮进脑海。她停了一秒，还是走了进去。',
-  },
-  {
-    id: 'chapter-4',
-    index: 4,
-    title: '守钟人的名单',
-    status: '草稿',
-    words: 0,
-    content: '',
-  },
-];
-
-const INITIAL_BOOKS: DemoBook[] = [
-  {
-    id: 'mist-harbor',
-    title: '雾港来信',
-    genre: '长篇悬疑',
-    status: '写作中',
-    chapters: 4,
-    words: 7280,
-    canonEntries: 18,
-    updatedAt: '今天 14:32',
-    coverTone: 'teal',
-  },
-  {
-    id: 'summer-orbit',
-    title: '夏日轨道',
-    genre: '青春科幻',
-    status: '筹备中',
-    chapters: 0,
-    words: 0,
-    canonEntries: 7,
-    updatedAt: '昨天 21:08',
-    coverTone: 'blue',
-  },
-  {
-    id: 'north-window',
-    title: '北窗旧事',
-    genre: '年代短篇集',
-    status: '已归档',
-    chapters: 10,
-    words: 46200,
-    canonEntries: 12,
-    updatedAt: '2026-06-18',
-    coverTone: 'red',
-  },
-];
 
 const SECTION_ITEMS: Array<{
   id: ProjectSection;
@@ -164,9 +108,9 @@ const WORKFLOWS = [
 const LIBRARY_STATUS_FILTERS = ['全部书籍', '写作中', '筹备中', '已归档'];
 const LIBRARY_GENRE_FILTERS = ['悬疑', '科幻', '奇幻', '年代'];
 
-function statusClass(status: DemoChapter['status']): string {
-  if (status === '定稿') return 'is-final';
-  if (status === '修改中') return 'is-editing';
+function statusClass(status: FictionChapterStatus): string {
+  if (status === 'final') return 'is-final';
+  if (status === 'revised') return 'is-editing';
   return 'is-draft';
 }
 
@@ -256,127 +200,163 @@ function ContextInspector({ mode, onModeChange }: {
 
 function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: FictionistSection }) {
   const { message } = App.useApp();
+  const index = useFictionistStore((state) => state.index);
+  const activeProjectId = useFictionistStore((state) => state.activeProjectId);
+  const activeChapterId = useFictionistStore((state) => state.activeChapterId);
+  const chapterContent = useFictionistStore((state) => state.chapterContent);
+  const dirty = useFictionistStore((state) => state.dirty);
+  const hydrationState = useFictionistStore((state) => state.hydrationState);
+  const saveState = useFictionistStore((state) => state.saveState);
+  const errorMessage = useFictionistStore((state) => state.errorMessage);
+  const hydrate = useFictionistStore((state) => state.hydrate);
+  const createProject = useFictionistStore((state) => state.createProject);
+  const openProject = useFictionistStore((state) => state.openProject);
+  const createStoredChapter = useFictionistStore((state) => state.createChapter);
+  const selectChapter = useFictionistStore((state) => state.selectChapter);
+  const updateChapterContent = useFictionistStore((state) => state.updateChapterContent);
+  const saveCurrentChapter = useFictionistStore((state) => state.saveCurrentChapter);
   const [section, setSection] = useState<FictionistSection>(initialSection);
-  const [books, setBooks] = useState(INITIAL_BOOKS);
-  const [activeBookId, setActiveBookId] = useState(INITIAL_BOOKS[0].id);
-  const [chapters, setChapters] = useState(INITIAL_CHAPTERS);
-  const [selectedChapterId, setSelectedChapterId] = useState(INITIAL_CHAPTERS[2].id);
   const [editorMode, setEditorMode] = useState<EditorMode>('edit');
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>('context');
-  const [dirtyChapterIds, setDirtyChapterIds] = useState<Set<string>>(() => new Set());
   const [continueOpen, setContinueOpen] = useState(false);
   const [compactInspectorOpen, setCompactInspectorOpen] = useState(false);
   const [createBookOpen, setCreateBookOpen] = useState(false);
+  const [creatingBook, setCreatingBook] = useState(false);
   const [newBookTitle, setNewBookTitle] = useState('');
   const [newBookGenre, setNewBookGenre] = useState('');
   const [libraryFilter, setLibraryFilter] = useState('全部书籍');
   const [query, setQuery] = useState('');
 
-  const activeBook = books.find((book) => book.id === activeBookId) ?? books[0];
-  const selectedChapter = chapters.find((chapter) => chapter.id === selectedChapterId) ?? chapters[0];
+  const books = useMemo(() => bookViews(index), [index]);
+  const activeBook = books.find((book) => book.id === activeProjectId) ?? books[0] ?? null;
+  const chapters = useMemo(
+    () => (activeProjectId ? chaptersForProject(index, activeProjectId) : []),
+    [activeProjectId, index],
+  );
+  const selectedChapter = activeChapterId ? index.chapters[activeChapterId] ?? null : null;
+  const selectedChapterNumber = selectedChapter
+    ? chapters.findIndex((chapter) => chapter.id === selectedChapter.id) + 1
+    : 0;
+  const activeVolume = activeBook ? index.volumes[activeBook.volumeIds[0]] : undefined;
   const visibleChapters = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return chapters;
     return chapters.filter((chapter) =>
-      `${chapter.index}${chapter.title}`.toLocaleLowerCase().includes(normalized),
+      `${chapters.indexOf(chapter) + 1}${chapter.title}`.toLocaleLowerCase().includes(normalized),
     );
   }, [chapters, query]);
   const visibleBooks = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return books.filter((book) => {
       const matchesQuery = !normalized
-        || `${book.title}${book.genre}${book.status}`.toLocaleLowerCase().includes(normalized);
+        || `${book.title}${book.genre}${book.statusLabel}`.toLocaleLowerCase().includes(normalized);
       const matchesFilter = libraryFilter === '全部书籍'
-        || book.status === libraryFilter
+        || book.statusLabel === libraryFilter
         || book.genre.includes(libraryFilter);
       return matchesQuery && matchesFilter;
     });
   }, [books, libraryFilter, query]);
   const libraryStats = books.reduce(
     (totals, book) => ({
-      chapters: totals.chapters + book.chapters,
-      words: totals.words + book.words,
+      chapters: totals.chapters + book.chapterCount,
+      words: totals.words + book.wordCount,
     }),
     { chapters: 0, words: 0 },
   );
 
-  const switchSection = (nextSection: FictionistSection) => {
+  const storeError = (fallback: string) =>
+    useFictionistStore.getState().errorMessage || fallback;
+
+  const switchSection = async (nextSection: FictionistSection) => {
+    if (nextSection === section) return;
+    if (dirty && !(await saveCurrentChapter())) {
+      message.error(storeError('保存失败，已留在当前页面'));
+      return;
+    }
     setSection(nextSection);
     setQuery('');
     const label = SECTION_ITEMS.find((item) => item.id === nextSection)?.label;
     if (nextSection !== 'chapters' && nextSection !== 'library') message.info(`已切换到${label}演示视图`);
   };
 
-  const createBook = () => {
+  const createBook = async () => {
     const title = newBookTitle.trim();
-    if (!title) return;
-    setBooks((current) => [{
-      id: `book-${Date.now()}`,
-      title,
-      genre: newBookGenre.trim() || '未设置题材',
-      status: '筹备中',
-      chapters: 0,
-      words: 0,
-      canonEntries: 0,
-      updatedAt: '刚刚',
-      coverTone: 'gold',
-    }, ...current]);
-    setNewBookTitle('');
-    setNewBookGenre('');
-    setCreateBookOpen(false);
-    message.success(`演示：已在书库中新建《${title}》`);
+    if (!title || creatingBook) return;
+    setCreatingBook(true);
+    try {
+      const projectId = await createProject(title, newBookGenre);
+      if (!projectId) {
+        message.error(storeError('创建作品失败'));
+        return;
+      }
+      setNewBookTitle('');
+      setNewBookGenre('');
+      setCreateBookOpen(false);
+      message.success(`已创建《${title}》`);
+    } finally {
+      setCreatingBook(false);
+    }
   };
 
-  const openBook = (book: DemoBook) => {
-    if (book.status === '已归档') {
-      message.info('演示：请先恢复已归档作品，再进入写作');
+  const openBook = async (book: BookView) => {
+    if (book.status === 'archived') {
+      message.info('请先恢复已归档作品，再进入写作');
       return;
     }
-    setActiveBookId(book.id);
+    if (!(await openProject(book.id))) {
+      message.error(storeError('打开作品失败'));
+      return;
+    }
     setSection('chapters');
     setQuery('');
-    message.success(`演示：已切换到《${book.title}》`);
+    setEditorMode('edit');
   };
 
-  const updateSelectedChapter = (content: string) => {
-    setChapters((current) => current.map((chapter) => (
-      chapter.id === selectedChapter.id
-        ? { ...chapter, content, words: content.replace(/\s/g, '').length }
-        : chapter
-    )));
-    setDirtyChapterIds((current) => new Set(current).add(selectedChapter.id));
+  const saveChapter = async () => {
+    if (!selectedChapter) return;
+    if (await saveCurrentChapter()) {
+      message.success(`已保存《${selectedChapter.title}》`);
+    } else {
+      message.error(storeError('保存章节失败'));
+    }
   };
 
-  const saveChapter = () => {
-    setDirtyChapterIds((current) => {
-      const next = new Set(current);
-      next.delete(selectedChapter.id);
-      return next;
-    });
-    message.success(`演示：已保存《${selectedChapter.title}》`);
-  };
-
-  const addChapter = () => {
-    const nextIndex = chapters.length + 1;
-    const chapter: DemoChapter = {
-      id: `chapter-${Date.now()}`,
-      index: nextIndex,
-      title: `未命名章节 ${nextIndex}`,
-      status: '草稿',
-      words: 0,
-      content: '',
-    };
-    setChapters((current) => [...current, chapter]);
-    setSelectedChapterId(chapter.id);
+  const addChapter = async () => {
+    const chapterId = await createStoredChapter();
+    if (!chapterId) {
+      message.error(storeError('创建章节失败'));
+      return;
+    }
     setSection('chapters');
     setEditorMode('edit');
-    message.success('演示：已创建一个空白章节');
+    message.success('已创建一个空白章节');
   };
 
   const confirmContinue = () => {
     setContinueOpen(false);
     message.success('演示：续写上下文已准备，功能实现后将在这里创建写作画布');
   };
+
+  if (hydrationState === 'error') {
+    return (
+      <div className="fictionist-workspace fictionist-load-state pearl-page-enter">
+        <Result
+          status="error"
+          title="小说数据加载失败"
+          subTitle={errorMessage || '无法读取本地小说数据'}
+          extra={<Button type="primary" onClick={() => void hydrate()}>重新加载</Button>}
+        />
+      </div>
+    );
+  }
+
+  if (hydrationState === 'loading') {
+    return (
+      <div className="fictionist-workspace fictionist-load-state pearl-page-enter">
+        <Spin description="正在加载小说数据…" size="large" />
+      </div>
+    );
+  }
 
   return (
     <div className="fictionist-workspace pearl-page-enter">
@@ -387,24 +367,24 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
             <span><strong>我的书库</strong><small>小说家专业包 · {books.length} 部作品</small></span>
           </div>
         ) : (
-          <button className="fictionist-project-identity fictionist-project-switcher" type="button" onClick={() => switchSection('library')}>
+          <button className="fictionist-project-identity fictionist-project-switcher" type="button" onClick={() => void switchSection('library')}>
             <span className="fictionist-project-mark"><BookOutlined /></span>
-            <span><strong>{activeBook.title}</strong><small>{activeBook.genre} · 返回书库切换作品</small></span>
+            <span><strong>{activeBook?.title ?? '未选择作品'}</strong><small>{activeBook?.genre ?? '未设置题材'} · 返回书库切换作品</small></span>
             <DownOutlined />
           </button>
         )}
         {section !== 'library' ? (
           <div className="fictionist-project-stats" aria-label="项目概况">
-            <span><strong>{activeBook.chapters}</strong> 章</span>
-            <span><strong>{activeBook.words.toLocaleString()}</strong> 字</span>
-            <span><strong>{activeBook.canonEntries}</strong> 条正式设定</span>
+            <span><strong>{activeBook?.chapterCount ?? 0}</strong> 章</span>
+            <span><strong>{(activeBook?.wordCount ?? 0).toLocaleString()}</strong> 字</span>
+            <span><strong>{activeBook?.canonEntryCount ?? 0}</strong> 条正式设定</span>
           </div>
         ) : null}
         {section !== 'library' ? (
           <div className="fictionist-project-actions">
-            <Button icon={<ArrowLeftOutlined />} onClick={() => switchSection('library')}>返回书架</Button>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => void switchSection('library')}>返回书架</Button>
             <Button className="fictionist-search-action" icon={<SearchOutlined />} onClick={() => message.info('演示：全书搜索')}>全书搜索</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={addChapter}>新建章节</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => void addChapter()}>新建章节</Button>
           </div>
         ) : null}
       </header>
@@ -418,7 +398,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                   type="button"
                   className={section === item.id ? 'is-active' : ''}
                   aria-current={section === item.id ? 'page' : undefined}
-                  onClick={() => switchSection(item.id)}
+                  onClick={() => void switchSection(item.id)}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -439,7 +419,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                 type="text"
                 size="small"
                 icon={<PlusOutlined />}
-                onClick={section === 'library' ? () => setCreateBookOpen(true) : addChapter}
+                onClick={section === 'library' ? () => setCreateBookOpen(true) : () => void addChapter()}
               />
             </Tooltip>
           </div>
@@ -457,7 +437,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
               {LIBRARY_STATUS_FILTERS.map((item) => (
                 <button type="button" className={libraryFilter === item ? 'is-active' : ''} key={item} onClick={() => setLibraryFilter(item)}>
                   <span>{item}</span>
-                  <small>{item === '全部书籍' ? books.length : books.filter((book) => book.status === item).length}</small>
+                  <small>{item === '全部书籍' ? books.length : books.filter((book) => book.statusLabel === item).length}</small>
                 </button>
               ))}
               <span className="fictionist-filter-label">题材</span>
@@ -470,23 +450,23 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
             </div>
           ) : section === 'chapters' ? (
             <div className="fictionist-chapter-tree">
-              <div className="fictionist-volume-label"><span>第一卷 · 潮汐失语</span><small>4 章</small></div>
+              <div className="fictionist-volume-label"><span>{activeVolume?.title ?? '第一卷'}</span><small>{chapters.length} 章</small></div>
               {visibleChapters.map((chapter) => (
                 <button
                   type="button"
                   key={chapter.id}
-                  className={selectedChapter.id === chapter.id ? 'is-active' : ''}
-                  onClick={() => {
-                    setSelectedChapterId(chapter.id);
-                    setEditorMode('edit');
-                  }}
+                  className={selectedChapter?.id === chapter.id ? 'is-active' : ''}
+                  onClick={() => void selectChapter(chapter.id).then((selected) => {
+                    if (selected) setEditorMode('edit');
+                    else message.error(storeError('切换章节失败'));
+                  })}
                 >
-                  <span className="fictionist-chapter-index">{String(chapter.index).padStart(2, '0')}</span>
+                  <span className="fictionist-chapter-index">{String(chapters.indexOf(chapter) + 1).padStart(2, '0')}</span>
                   <span className="fictionist-chapter-copy">
                     <strong>{chapter.title}</strong>
-                    <small>{chapter.words.toLocaleString()} 字</small>
+                    <small>{chapter.wordCount.toLocaleString()} 字</small>
                   </span>
-                  <span className={`fictionist-status-dot ${statusClass(chapter.status)}`} title={chapter.status} />
+                  <span className={`fictionist-status-dot ${statusClass(chapter.status)}`} title={CHAPTER_STATUS_LABELS[chapter.status]} />
                 </button>
               ))}
             </div>
@@ -510,7 +490,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
             </div>
           )}
           <div className="fictionist-navigator-footer">
-            <span><CheckCircleOutlined />{section === 'library' ? '作品数据仅保存在本机' : '本地草稿已同步'}</span>
+            <span><CheckCircleOutlined />{section === 'library' ? '作品数据仅保存在本机' : dirty ? '有未保存修改' : '本地草稿已同步'}</span>
           </div>
         </aside>
 
@@ -536,37 +516,37 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                   <small>空白作品</small>
                 </button>
                 {visibleBooks.map((book) => (
-                  <article className={`fictionist-book-card ${book.id === activeBookId ? 'is-current' : ''}`} key={book.id}>
+                  <article className={`fictionist-book-card ${book.id === activeProjectId ? 'is-current' : ''}`} key={book.id}>
                     <button
                       className="fictionist-book-open"
                       type="button"
                       aria-label={`打开《${book.title}》`}
-                      disabled={book.status === '已归档'}
-                      onClick={() => openBook(book)}
+                      disabled={book.status === 'archived'}
+                      onClick={() => void openBook(book)}
                     >
                       <span className={`fictionist-book-cover fictionist-book-cover--${book.coverTone}`}>
                         <small>FICTION</small>
                         <strong>{book.title}</strong>
                         <span>{book.genre}</span>
-                        {book.id === activeBookId ? <em>当前</em> : null}
+                        {book.id === activeProjectId ? <em>当前</em> : null}
                       </span>
                       <span className="fictionist-book-copy">
                         <strong>{book.title}</strong>
-                        <small>{book.genre} · {book.status}</small>
+                        <small>{book.genre} · {book.statusLabel}</small>
                       </span>
                     </button>
                     <span className="fictionist-book-footer">
-                      <span className="fictionist-book-metrics" aria-label={`${book.chapters} 章，${book.words.toLocaleString()} 字`}>
-                        <span><strong>{book.chapters}</strong><small>章节</small></span>
-                        <span><strong>{book.words.toLocaleString()}</strong><small>字数</small></span>
+                      <span className="fictionist-book-metrics" aria-label={`${book.chapterCount} 章，${book.wordCount.toLocaleString()} 字`}>
+                        <span><strong>{book.chapterCount}</strong><small>章节</small></span>
+                        <span><strong>{book.wordCount.toLocaleString()}</strong><small>字数</small></span>
                       </span>
                       <span className="fictionist-book-actions">
                       <Tooltip title="项目设置"><Button aria-label={`设置《${book.title}》`} icon={<SettingOutlined />} onClick={() => message.info(`演示：打开《${book.title}》项目设置`)} /></Tooltip>
-                      <Tooltip title={book.status === '已归档' ? '恢复作品' : '归档作品'}>
+                      <Tooltip title={book.status === 'archived' ? '恢复作品' : '归档作品'}>
                         <Button
-                          aria-label={`${book.status === '已归档' ? '恢复' : '归档'}《${book.title}》`}
+                          aria-label={`${book.status === 'archived' ? '恢复' : '归档'}《${book.title}》`}
                           icon={<InboxOutlined />}
-                          onClick={() => message.info(`演示：${book.status === '已归档' ? '恢复' : '归档'}《${book.title}》`)}
+                          onClick={() => message.info(`演示：${book.status === 'archived' ? '恢复' : '归档'}《${book.title}》`)}
                         />
                       </Tooltip>
                       </span>
@@ -582,16 +562,16 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                 ) : null}
               </div>
             </div>
-          ) : section === 'chapters' ? (
+          ) : section === 'chapters' && selectedChapter ? (
             <>
               <div className="fictionist-editor-header">
                 <div>
-                  <div className="fictionist-editor-eyebrow">第一卷 · 第 {selectedChapter.index} 章</div>
+                  <div className="fictionist-editor-eyebrow">{activeVolume?.title ?? '第一卷'} · 第 {selectedChapterNumber} 章</div>
                   <h1>{selectedChapter.title}</h1>
                   <div className="fictionist-editor-meta">
-                    <span>{selectedChapter.words.toLocaleString()} 字</span>
-                    <span>{selectedChapter.status}</span>
-                    <span>{dirtyChapterIds.has(selectedChapter.id) ? '有未保存修改' : '已保存'}</span>
+                    <span>{(dirty ? countFictionWords(chapterContent) : selectedChapter.wordCount).toLocaleString()} 字</span>
+                    <span>{CHAPTER_STATUS_LABELS[selectedChapter.status]}</span>
+                    <span>{dirty ? '有未保存修改' : saveState === 'error' ? '保存失败' : '已保存'}</span>
                   </div>
                 </div>
                 <div className="fictionist-editor-actions">
@@ -606,7 +586,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                   />
                   <Tooltip title="版本历史"><Button icon={<HistoryOutlined />} onClick={() => message.info('演示：这里将打开章节版本历史')} /></Tooltip>
                   <Button className="fictionist-context-trigger" onClick={() => setCompactInspectorOpen(true)}>上下文</Button>
-                  <Button icon={<SaveOutlined />} onClick={saveChapter}>保存</Button>
+                  <Button icon={<SaveOutlined />} loading={saveState === 'saving'} onClick={() => void saveChapter()}>保存</Button>
                   <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => setContinueOpen(true)}>续写下一章</Button>
                 </div>
               </div>
@@ -614,19 +594,28 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                 {editorMode === 'edit' ? (
                   <textarea
                     aria-label="章节正文编辑区"
-                    value={selectedChapter.content}
+                    value={chapterContent}
                     placeholder="从这里开始写这一章……"
                     spellCheck={false}
-                    onChange={(event) => updateSelectedChapter(event.target.value)}
+                    onChange={(event) => updateChapterContent(event.target.value)}
                   />
-                ) : <ChapterPreview content={selectedChapter.content} />}
+                ) : <ChapterPreview content={chapterContent} />}
               </div>
               <footer className="fictionist-editor-footer">
                 <span>Markdown 正文</span>
-                <span>自动保存演示已关闭</span>
+                <span>手动保存</span>
                 <span>缩放 100%</span>
               </footer>
             </>
+          ) : section === 'chapters' ? (
+            <div className="fictionist-empty-copy">
+              <FileTextOutlined />
+              <strong>这部作品还没有章节</strong>
+              <span>新建第一个章节后即可开始写作。</span>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => void addChapter()}>
+                新建章节
+              </Button>
+            </div>
           ) : section === 'canon' ? (
             <div className="fictionist-content-view">
               <header><span><small>作品事实库</small><h1>设定库</h1></span><Button type="primary" icon={<PlusOutlined />} onClick={() => message.success('演示：新建设定')}>新建设定</Button></header>
@@ -667,7 +656,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
           )}
         </main>
 
-        {section === 'chapters' ? (
+        {section === 'chapters' && selectedChapter ? (
           <aside className="fictionist-inspector">
             <ContextInspector mode={inspectorMode} onModeChange={setInspectorMode} />
           </aside>
@@ -690,6 +679,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
         onOk={createBook}
         okText="创建作品"
         cancelText="取消"
+        confirmLoading={creatingBook}
         okButtonProps={{ disabled: !newBookTitle.trim() }}
       >
         <div className="fictionist-create-form">
@@ -701,7 +691,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
               placeholder="例如：群星沉入海底"
               value={newBookTitle}
               onChange={(event) => setNewBookTitle(event.target.value)}
-              onPressEnter={createBook}
+              onPressEnter={() => void createBook()}
             />
           </label>
           <label>
@@ -711,10 +701,10 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
               placeholder="例如：长篇奇幻"
               value={newBookGenre}
               onChange={(event) => setNewBookGenre(event.target.value)}
-              onPressEnter={createBook}
+              onPressEnter={() => void createBook()}
             />
           </label>
-          <p className="fictionist-modal-note">这是界面演示，关闭软件后新建内容不会保留。</p>
+          <p className="fictionist-modal-note">作品和章节保存在本机，重启应用后仍可继续编辑。</p>
         </div>
       </Modal>
 
@@ -726,7 +716,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
         okText="准备写作画布"
         cancelText="取消"
       >
-        <p className="fictionist-modal-copy">本次续写将以《{selectedChapter.title}》当前版本为起点，并注入以下内容：</p>
+        <p className="fictionist-modal-copy">本次续写将以《{selectedChapter?.title ?? '当前章节'}》当前版本为起点，并注入以下内容：</p>
         <ul className="fictionist-context-preview">
           <li><CheckCircleOutlined />本章正文与结尾片段</li>
           <li><CheckCircleOutlined />林砚、老杜的当前人物状态</li>

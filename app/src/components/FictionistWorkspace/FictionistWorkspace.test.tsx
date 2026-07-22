@@ -1,9 +1,14 @@
 import { App as AntdApp } from 'antd';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import FictionistWorkspace from './FictionistWorkspace';
 
 type FictionistSection = 'library' | 'chapters' | 'canon' | 'timeline' | 'workflows';
+const workspaceSource = readFileSync(
+  new URL('./FictionistWorkspace.tsx', import.meta.url),
+  'utf8',
+);
 
 function renderWorkspace(initialSection?: FictionistSection): string {
   return renderToStaticMarkup(
@@ -81,5 +86,24 @@ describe('fictionist workspace mock', () => {
     expect(html).toContain('小说工作流');
     expect(html).toContain('在画布中编辑');
     expect(html).toContain('章节连续性检查');
+  });
+
+  it('shows a recoverable error instead of sample data when hydration fails', () => {
+    expect(workspaceSource).toContain("hydrationState === 'error'");
+    expect(workspaceSource).toContain('小说数据加载失败');
+    expect(workspaceSource).toContain('重新加载');
+  });
+
+  it('renders an intentional empty editor for a project without chapters', () => {
+    expect(workspaceSource).toContain("section === 'chapters' && selectedChapter");
+    expect(workspaceSource).toContain('这部作品还没有章节');
+    expect(workspaceSource).toContain('新建第一个章节后即可开始写作。');
+  });
+
+  it('uses real persistence copy for creation and saving', () => {
+    expect(workspaceSource).toContain('作品和章节保存在本机');
+    expect(workspaceSource).not.toContain('关闭软件后新建内容不会保留');
+    expect(workspaceSource).not.toContain('演示：已在书库中新建');
+    expect(workspaceSource).not.toContain('演示：已保存');
   });
 });
