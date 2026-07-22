@@ -1,21 +1,17 @@
-﻿import { useMemo } from 'react';
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createProjectStorage } from '../lib/tauriStorage';
 import type { TestStatus } from '../lib/llmClient';
 import { CUSTOM_ID } from '../lib/providers';
 import { clockTime } from '../lib/time';
-import { mergeInferredModelCaps } from '../lib/modelCapabilityInfer';
+import { inferModelCaps, mergeInferredModelCaps } from '../lib/modelCapabilityInfer';
 
 // 子模型能力:声明给 agent,决定该模型是否支持长上下文/图像/语音
 export interface ModelCaps {
   longContext: boolean; // 长上下文(1M)
   vision: boolean; // 视觉/图像
   audio: boolean; // 语音/音频
-}
-
-export function emptyCaps(): ModelCaps {
-  return { longContext: false, vision: false, audio: false };
 }
 
 export interface ModelEntry {
@@ -92,7 +88,7 @@ function normalizeModelCapsInConfig(config: ProviderConfig): ProviderConfig {
     ...config,
     models: config.models.map((model) => ({
       ...model,
-      caps: mergeInferredModelCaps(model.caps ?? emptyCaps(), model.id),
+      caps: mergeInferredModelCaps(model.caps, model.id),
     })),
   };
 }
@@ -154,7 +150,7 @@ export const useModelStore = create<ModelState>()(
             const fetched = new Set(ids);
             const merged = ids.map((mid) => {
               const old = c.models.find((m) => m.id === mid);
-              return old ? { ...old, caps: mergeInferredModelCaps(old.caps, mid) } : { id: mid, enabled: true, caps: mergeInferredModelCaps(emptyCaps(), mid) };
+              return old ?? { id: mid, enabled: true, caps: inferModelCaps(mid) };
             });
             // 追加不在本次返回中的既有模型(手动添加或上次拉取残留)
             const kept = c.models.filter((m) => !fetched.has(m.id));
@@ -171,7 +167,7 @@ export const useModelStore = create<ModelState>()(
               ...c,
               models: [
                 ...c.models,
-                { id: modelId, enabled: true, caps: mergeInferredModelCaps(emptyCaps(), modelId) },
+                { id: modelId, enabled: true, caps: inferModelCaps(modelId) },
               ],
             };
           }),
@@ -211,7 +207,7 @@ export const useModelStore = create<ModelState>()(
         set((s) => ({
           configs: mapModel(s.configs, id, modelId, (m) => ({
             ...m,
-            caps: mergeInferredModelCaps(m.caps, modelId),
+            caps: inferModelCaps(modelId),
           })),
         })),
 
@@ -261,7 +257,10 @@ export const useModelStore = create<ModelState>()(
                   id: String(mm.id ?? ''),
                   label: typeof mm.label === 'string' ? mm.label : undefined,
                   enabled: mm.enabled !== false,
-                  caps: mergeInferredModelCaps((mm.caps as ModelCaps) ?? emptyCaps(), String(mm.id ?? '')),
+                  caps: mergeInferredModelCaps(
+                    mm.caps && typeof mm.caps === 'object' ? mm.caps as ModelCaps : undefined,
+                    String(mm.id ?? ''),
+                  ),
                 };
               }),
               test: { status: 'idle' },

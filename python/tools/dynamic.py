@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ REGISTRY_PATH = CUSTOM_DIR / "registry.json"
 # 不随 build-dist 打包(custom/ 下仅 __init__.py 入包)。报告中心据此展示「谁、何时、批准了哪段代码」。
 AUDIT_PATH = CUSTOM_DIR / "tool-audit.jsonl"
 MAX_AUDIT_RECORDS = 500
+_AUDIT_LOG_LOCK = threading.Lock()
 
 
 def user_packages_dir() -> Path:
@@ -250,13 +252,14 @@ def read_audit_log(limit: int = 200) -> list[dict[str, Any]]:
 def append_audit_record(record: dict[str, Any]) -> None:
     """追加一条审计记录并原子重写(封顶 MAX_AUDIT_RECORDS，超出丢最旧)。写失败只记日志、不抛。"""
     try:
-        AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        kept = read_audit_log(limit=MAX_AUDIT_RECORDS - 1)
-        kept.append(record)
-        payload = (
-            "\n".join(json.dumps(r, ensure_ascii=False) for r in kept) + "\n"
-        ).encode("utf-8")
-        atomic_write_bytes(AUDIT_PATH, payload)
+        with _AUDIT_LOG_LOCK:
+            AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            kept = read_audit_log(limit=MAX_AUDIT_RECORDS - 1)
+            kept.append(record)
+            payload = (
+                "\n".join(json.dumps(r, ensure_ascii=False) for r in kept) + "\n"
+            ).encode("utf-8")
+            atomic_write_bytes(AUDIT_PATH, payload)
     except Exception:  # noqa: BLE001 审计写失败不应影响已完成的安装
         logger.exception("[dynamic] 审计日志写入失败")
 

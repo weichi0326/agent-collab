@@ -115,6 +115,50 @@ class RemoveToolTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "未找到"):
                 installer.remove_tool("nope-tool", {})
 
+    def test_remove_holds_registry_commit_lock_for_registry_update(self):
+        class RecordingLock:
+            held = False
+
+            def __enter__(self):
+                self.held = True
+
+            def __exit__(self, *_args):
+                self.held = False
+
+        lock = RecordingLock()
+        entries = [{"name": "custom-tool", "module": "custom_tool"}]
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            dynamic, "CUSTOM_DIR", Path(tmp)
+        ), patch.object(dynamic, "read_registry", return_value=entries), patch.object(
+            installer, "_REGISTRY_COMMIT_LOCK", lock
+        ), patch.object(dynamic, "write_registry") as write_registry:
+            Path(tmp, "custom_tool.py").write_text(VALID_CODE, encoding="utf-8")
+            registry = {"custom-tool": object()}
+
+            installer.remove_tool("custom-tool", registry)
+
+        self.assertFalse(lock.held)
+        self.assertNotIn("custom-tool", registry)
+        write_registry.assert_called_once_with([])
+        self.assertTrue(write_registry.call_args is not None)
+
+    def test_remove_restores_module_when_registry_write_fails(self):
+        entries = [{"name": "custom-tool", "module": "custom_tool"}]
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            dynamic, "CUSTOM_DIR", Path(tmp)
+        ), patch.object(dynamic, "read_registry", return_value=entries), patch.object(
+            dynamic, "write_registry", side_effect=OSError("write failed")
+        ):
+            module_path = Path(tmp, "custom_tool.py")
+            module_path.write_text(VALID_CODE, encoding="utf-8")
+            registry = {"custom-tool": object()}
+
+            with self.assertRaisesRegex(OSError, "write failed"):
+                installer.remove_tool("custom-tool", registry)
+
+            self.assertEqual(module_path.read_text(encoding="utf-8"), VALID_CODE)
+            self.assertIn("custom-tool", registry)
+
 
 class ToolSnapshotTests(unittest.TestCase):
     def test_reads_complete_custom_tool_snapshot(self):

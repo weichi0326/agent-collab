@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createProjectStorage } from '../lib/tauriStorage';
 import { uid } from '../lib/id'; // L5+L6 修复：复用已有 uid() 代替重复的 ID 生成函数
@@ -341,6 +341,12 @@ function makeDiagnosisSession(): ChatSession {
   };
 }
 
+export function ensureDiagnosisSession(sessions: ChatSession[]): ChatSession[] {
+  return sessions.some((session) => session.id === DIAGNOSIS_SESSION_ID)
+    ? sessions
+    : [makeDiagnosisSession(), ...sessions];
+}
+
 // 从首条用户消息截取标题(去空白,截断到 20 字)
 function deriveTitle(content: string): string {
   const t = content.trim().replace(/\s+/g, ' ');
@@ -557,26 +563,27 @@ export const useMasterAgentStore = create<MasterAgentState>()(
               record.kind === mappedKind &&
               record.content.toLocaleLowerCase() === content.toLocaleLowerCase(),
           );
+          if (!content || exists) {
+            return {
+              memory: appendUniqueMemory(s.memory, kind, text),
+              memoryRecords: s.memoryRecords,
+            };
+          }
           const now = Date.now();
+          const record: JiziMemoryRecord = {
+            id: uid('mem'),
+            kind: mappedKind,
+            content,
+            source: { origin: 'conversation' },
+            createdAt: now,
+            updatedAt: now,
+            confidence: 0.8,
+            scope: 'global',
+            status: 'active',
+          };
           return {
             memory: appendUniqueMemory(s.memory, kind, text),
-            memoryRecords:
-              !content || exists
-                ? s.memoryRecords
-                : [
-                    ...s.memoryRecords,
-                    {
-                      id: uid('mem'),
-                      kind: mappedKind,
-                      content,
-                      source: { origin: 'conversation' },
-                      createdAt: now,
-                      updatedAt: now,
-                      confidence: 0.8,
-                      scope: 'global',
-                      status: 'active',
-                    },
-                  ].slice(-MEMORY_RECORD_CAP),
+            memoryRecords: [...s.memoryRecords, record].slice(-MEMORY_RECORD_CAP),
           };
         });
       },
@@ -587,9 +594,9 @@ export const useMasterAgentStore = create<MasterAgentState>()(
           const mappedKind = recordKind(kind);
           return {
             memory: {
-            ...s.memory,
-            [kind]: s.memory[kind].filter((_, i) => i !== index),
-          },
+              ...s.memory,
+              [kind]: s.memory[kind].filter((_, i) => i !== index),
+            },
             memoryRecords: s.memoryRecords.map((record) =>
               record.kind === mappedKind && record.content === removed
                 ? { ...record, status: 'superseded' as const, updatedAt: Date.now() }
@@ -692,22 +699,19 @@ export const useMasterAgentStore = create<MasterAgentState>()(
             };
           }
         }
-        return next;
+        const sessions = Array.isArray(next.sessions)
+          ? (next.sessions as ChatSession[])
+          : [];
+        return { ...next, sessions: ensureDiagnosisSession(sessions) };
         } catch {
           return {
-            sessions: [],
+            sessions: [makeDiagnosisSession()],
             activeId: null,
             memory: emptyMemory(),
             memoryRecords: [],
             systemPrompt: DEFAULT_SYSTEM_PROMPT,
             systemPromptSourceName: null,
           };
-        }
-      },
-      // 水合后确保诊断固定会话存在(老用户持久化数据里没有它)。
-      onRehydrateStorage: () => (state) => {
-        if (state && !state.sessions.some((x) => x.id === DIAGNOSIS_SESSION_ID)) {
-          state.sessions = [makeDiagnosisSession(), ...state.sessions];
         }
       },
     },

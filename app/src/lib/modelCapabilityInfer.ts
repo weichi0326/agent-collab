@@ -1,4 +1,4 @@
-﻿import type { ModelCaps } from '../stores/modelStore';
+import type { ModelCaps } from '../stores/modelStore';
 
 const VISION_HINTS = [
   'vision',
@@ -59,10 +59,5 @@ export function inferModelCaps(modelId: string): ModelCaps {
 }
 
 export function mergeInferredModelCaps(current: ModelCaps | undefined, modelId: string): ModelCaps {
-  const inferred = inferModelCaps(modelId);
-  return {
-    longContext: current?.longContext || inferred.longContext,
-    vision: current?.vision || inferred.vision,
-    audio: current?.audio || inferred.audio,
-  };
+  return current ?? inferModelCaps(modelId);
 }

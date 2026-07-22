@@ -1,5 +1,6 @@
 import { pad, stamp } from '../../lib/time';
 import { uid } from '../../lib/id';
+import { sanitizePathSegment } from '../../lib/pathNames';
 import type { Canvas, SavedCanvas } from './types';
 
 function letterFromIndex(n: number): string {
@@ -57,18 +58,8 @@ export function validateCanvasName(
   return { ok: true };
 }
 
-function safeOutputPathSegment(name: string, max = 72): string {
-  const cleaned = Array.from(name)
-    .map((ch) => (ch.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(ch) ? '_' : ch))
-    .join('')
-    .replace(/\s+/g, '_')
-    .replace(/[. ]+$/g, '')
-    .slice(0, max);
-  return cleaned || 'untitled';
-}
-
 function outputCanvasFolderName(canvasName: string, d: Date): string {
-  const cleaned = safeOutputPathSegment(canvasName, 96);
+  const cleaned = sanitizePathSegment(canvasName, 96, 'untitled');
   return /_\d{14}$/.test(cleaned) ? cleaned : `${cleaned}_${stamp(d)}`;
 }
 
@@ -83,6 +74,6 @@ export function outputFolderName(
     month,
     day,
     outputCanvasFolderName(canvasName, d),
-    safeOutputPathSegment(agentName),
+    sanitizePathSegment(agentName, 72, 'untitled'),
   ].join('/');
 }

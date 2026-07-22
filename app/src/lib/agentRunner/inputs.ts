@@ -329,28 +329,6 @@ function upstreamInputSection(
   mode: ReturnType<typeof inputCapability>['contentMode'],
 ): string {
   const parts = [`## 前序节点：${output.label}`];
-  if (mode === 'legacy') {
-    if (output.structuredData) {
-      parts.push(
-        `### 机器可读 JSON\n${JSON.stringify(output.structuredData, null, 2)}`,
-      );
-    }
-    if (output.summary) parts.push(`### 摘要\n${output.summary}`);
-    parts.push(`### 文本兜底\n${output.content}`);
-    return parts.join('\n\n');
-  }
-
-  if (mode === 'smart') {
-    if (output.structuredData) {
-      parts.push(`### 结构化内容\n${JSON.stringify(output.structuredData, null, 2)}`);
-    } else if (output.summary) {
-      parts.push(`### 摘要\n${output.summary}`);
-    } else {
-      parts.push(`### 完整内容\n${output.content}`);
-    }
-    return parts.join('\n\n');
-  }
-
   if (mode === 'structured') {
     parts.push(
       output.structuredData
@@ -360,7 +338,7 @@ function upstreamInputSection(
   } else if (mode === 'summary') {
     parts.push(`### 摘要\n${output.summary || output.content}`);
   } else {
-    parts.push(`### 完整内容\n${output.content}`);
+    parts.push(`### 正文\n${output.content}`);
   }
   return parts.join('\n\n');
 }

@@ -128,9 +128,9 @@ export const TOOL_REGISTRY: ToolDef[] = [
     summary: '调用已配置的 LLM 模型完成文本生成、推理与对话任务',
     implementation: {
       language: 'TypeScript + Python',
-      libraries: ['@tauri-apps/plugin-http', 'llmClient.ts', 'requests'],
+      libraries: ['llmClient.ts', 'Python requests/urllib3'],
       note:
-        '总 Agent 对话经 Tauri 插件 fetch 发起；Agent Runner 通过 Python llm-calling 工具代理调用；' +
+        '总 Agent 与 Agent Runner 对话统一经 Python llm-calling 的固定 IP 网络层代理；' +
         '支持 OpenAI 兼容 / Anthropic Messages / Gemini 风格接口',
     },
     capabilities: [

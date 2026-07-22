@@ -1,3 +1,5 @@
+import { sanitizePathSegment } from '../pathNames';
+
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return '未知错误';
@@ -25,7 +27,7 @@ export function isAbortError(err: unknown): boolean {
 }
 
 export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 // 可中断等待:到点 resolve;signal.abort 时清定时器并抛 AbortError(走既有 isAbortError catch)。
@@ -49,12 +51,7 @@ export function interruptibleSleep(ms: number, signal?: AbortSignal): Promise<vo
 }
 
 export function safeFileName(name: string): string {
-  const cleaned = Array.from(name)
-    .map((ch) => (ch.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(ch) ? '_' : ch))
-    .join('')
-    .replace(/\s+/g, '_')
-    .slice(0, 48);
-  return cleaned || 'agent';
+  return sanitizePathSegment(name, 48, 'agent');
 }
 
 export function joinPath(root: string, ...parts: string[]): string {

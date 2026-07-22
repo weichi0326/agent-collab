@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
-import type { AgentNodeData } from '../../stores/canvasStore';
-import { collectInput } from './inputs';
-import { requiredToolTagsForNode } from './inputs';
-import type { Canvas } from '../../stores/canvasStore';
+import type { AgentNodeData, Canvas } from '../../stores/canvasStore';
+import { collectInput, requiredToolTagsForNode } from './inputs';
 import type { NodeOutput } from './types';
 
 function node(data: AgentNodeData): Node {
@@ -16,7 +14,10 @@ const outputs = new Map<string, NodeOutput>([
     label: '结构化来源',
     content: 'A 的完整正文',
     summary: 'A 的摘要',
-    structuredData: { value: 'A' },
+    structuredData: {
+      value: 'A',
+      contentRef: { kind: 'artifact', path: 'outputs/a.md' },
+    },
   }],
   ['b', {
     nodeId: 'b',
@@ -27,14 +28,16 @@ const outputs = new Map<string, NodeOutput>([
 ]);
 
 describe('collectInput capability modes', () => {
-  it('keeps legacy JSON, summary and text sections when input capability is disabled', async () => {
+  it('uses full upstream body by default when input capability is disabled', async () => {
     const result = await collectInput(node({}), ['a'], outputs);
-    expect(result.text).toContain('机器可读 JSON');
-    expect(result.text).toContain('A 的摘要');
+    expect(result.text).toContain('### 正文');
     expect(result.text).toContain('A 的完整正文');
+    expect(result.text).not.toContain('机器可读 JSON');
+    expect(result.text).not.toContain('A 的摘要');
+    expect(result.text).not.toContain('"value": "A"');
   });
 
-  it('selects and orders upstream nodes while smart mode avoids duplicate content', async () => {
+  it('selects and orders upstream nodes while full mode keeps only body text', async () => {
     const result = await collectInput(node({
       capabilities: {
         input: {
@@ -42,17 +45,33 @@ describe('collectInput capability modes', () => {
           selectionMode: 'selected',
           selectedUpstreamIds: ['a', 'b'],
           upstreamOrder: ['b', 'a'],
-          contentMode: 'smart',
+          contentMode: 'full',
         },
       },
     }), ['a', 'b'], outputs);
 
     expect(result.text.indexOf('普通来源')).toBeLessThan(result.text.indexOf('结构化来源'));
-    expect(result.text).toContain('B 的摘要');
-    expect(result.text).not.toContain('B 的完整正文');
-    expect(result.text).toContain('"value": "A"');
-    expect(result.text).not.toContain('A 的摘要');
-    expect(result.text).not.toContain('A 的完整正文');
+    expect(result.text).toContain('B 的完整正文');
+    expect(result.text).toContain('A 的完整正文');
+    expect(result.text).not.toContain('B 的摘要');
+    expect(result.text).not.toContain('"value": "A"');
+  });
+
+  it('uses summary or structured content without duplicating full body', async () => {
+    const summary = await collectInput(node({
+      capabilities: { input: { enabled: true, contentMode: 'summary' } },
+    }), ['a'], outputs);
+    expect(summary.text).toContain('A 的摘要');
+    expect(summary.text).not.toContain('A 的完整正文');
+    expect(summary.text).not.toContain('"value": "A"');
+
+    const structured = await collectInput(node({
+      capabilities: { input: { enabled: true, contentMode: 'structured' } },
+    }), ['a'], outputs);
+    expect(structured.text).toContain('"value": "A"');
+    expect(structured.text).toContain('"contentRef"');
+    expect(structured.text).not.toContain('A 的完整正文');
+    expect(structured.text).not.toContain('A 的摘要');
   });
 
   it('applies the configured length policy after assembling upstream input', async () => {

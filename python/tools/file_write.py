@@ -268,7 +268,7 @@ async def execute(params: dict[str, Any]) -> Any:
     return {
         "path": str(path),
         "mode": mode,
-        "written": len(content),
+        "written": len(payload_bytes) if binary_b64 and payload_bytes is not None else len(content.encode(encoding)),
         "atomic": atomic,
         "permission_repaired": permission_repaired,
         "repair_diagnostics": repair_diagnostics,

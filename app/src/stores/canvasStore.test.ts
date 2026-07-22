@@ -106,7 +106,7 @@ describe('saved canvas deletion', () => {
           edges: [],
           savedId: saved.id,
           lockClose: true,
-          runState: { status: 'running', startedAt: 1 },
+          runState: { status: 'running', startedAt: '2026-07-20 00:00:00' },
         },
       ],
       activeId: 'canvas-running',

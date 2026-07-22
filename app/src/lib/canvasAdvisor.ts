@@ -1,4 +1,5 @@
-﻿import type { Canvas } from '../stores/canvasStore';
+import type { AgentNodeData, Canvas } from '../stores/canvasStore';
+import { nodeLabel as sharedNodeLabel } from './agentNode';
 
 export interface CanvasAdviceItem {
   level: 'good' | 'warn' | 'bad';
@@ -8,7 +9,7 @@ export interface CanvasAdviceItem {
 }
 
 function nodeLabel(node: Canvas['nodes'][number]): string {
-  return String(node.data?.label || '未命名节点');
+  return sharedNodeLabel(node, '未命名节点');
 }
 
 export function buildCanvasAdvice(canvas: Canvas | undefined | null): CanvasAdviceItem[] {
@@ -42,12 +43,12 @@ export function buildCanvasAdvice(canvas: Canvas | undefined | null): CanvasAdvi
   }
 
   const sourceWithoutInput = sourceNodes.filter((node) => {
-    const data = node.data as { dataSourceFiles?: unknown[]; dataSourceUrls?: unknown[]; dataSourceHistoryPaths?: unknown[] };
-    return (
-      (data.dataSourceFiles?.length ?? 0) === 0 &&
-      (data.dataSourceUrls?.length ?? 0) === 0 &&
-      (data.dataSourceHistoryPaths?.length ?? 0) === 0
-    );
+    const data = node.data as AgentNodeData;
+    if (data.dataSourceMode === 'url') return !data.dataSourceUrl?.trim();
+    if (data.dataSourceMode === 'history') {
+      return !Array.isArray(data.dataSourceHistoryPaths) || data.dataSourceHistoryPaths.length === 0;
+    }
+    return !Array.isArray(data.dataSourceFiles) || data.dataSourceFiles.length === 0;
   });
   if (sourceWithoutInput.length > 0) {
     advice.push({

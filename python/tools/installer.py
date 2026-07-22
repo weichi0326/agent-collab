@@ -600,18 +600,25 @@ def remove_tool(name: str, registry: dict[str, Any]) -> None:
     """删除自定义工具：拒删内置 → 删模块文件 + registry 条目 + 从 registry 反注册。"""
     if name in dynamic.BUILTIN_NAMES:
         raise ValueError(f"'{name}' 是内置工具，不允许删除。")
-    entries = dynamic.read_registry()
-    target = next((e for e in entries if e.get("name") == name), None)
-    if target is None:
-        raise ValueError(f"未找到自定义工具 '{name}'")
+    with _REGISTRY_COMMIT_LOCK:
+        entries = dynamic.read_registry()
+        target = next((e for e in entries if e.get("name") == name), None)
+        if target is None:
+            raise ValueError(f"未找到自定义工具 '{name}'")
 
-    module = target.get("module") or _module_name(name)
-    module_path = dynamic.CUSTOM_DIR / f"{module}.py"
-    if module_path.exists():
+        module = target.get("module") or _module_name(name)
+        module_path = dynamic.CUSTOM_DIR / f"{module}.py"
+        old_module = module_path.read_bytes() if module_path.exists() else None
+        if old_module is not None:
+            try:
+                module_path.unlink()
+            except OSError as exc:
+                raise RuntimeError(f"删除模块文件失败：{exc}") from exc
+
         try:
-            module_path.unlink()
-        except OSError as exc:
-            raise RuntimeError(f"删除模块文件失败：{exc}") from exc
-
-    dynamic.write_registry([e for e in entries if e.get("name") != name])
-    registry.pop(name, None)
+            dynamic.write_registry([e for e in entries if e.get("name") != name])
+        except Exception:
+            if old_module is not None:
+                dynamic.atomic_write_bytes(module_path, old_module)
+            raise
+        registry.pop(name, None)

@@ -10,6 +10,7 @@ import hashlib
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -110,6 +111,24 @@ class InstallAuditTests(unittest.TestCase):
                 dynamic.append_audit_record({"ts": i, "name": f"t{i}"})
         records = dynamic.read_audit_log()
         self.assertEqual([r["ts"] for r in records], [2, 3, 4])  # 只留最近 3 条
+
+    def test_concurrent_audit_appends_keep_every_record(self) -> None:
+        workers = 12
+        barrier = threading.Barrier(workers)
+
+        def append(index: int) -> None:
+            barrier.wait()
+            dynamic.append_audit_record({"ts": index, "name": f"t{index}"})
+
+        threads = [threading.Thread(target=append, args=(index,)) for index in range(workers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        records = dynamic.read_audit_log()
+        self.assertEqual(len(records), workers)
+        self.assertEqual({record["name"] for record in records}, {f"t{i}" for i in range(workers)})
 
 
 if __name__ == "__main__":

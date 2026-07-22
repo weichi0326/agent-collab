@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SYSTEM_PROMPT } from './masterAgentStore';
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  DIAGNOSIS_SESSION_ID,
+  ensureDiagnosisSession,
+  type ChatSession,
+} from './masterAgentStore';
 
 describe('DEFAULT_SYSTEM_PROMPT', () => {
   it('uses the generalized multi-agent workflow personality by default', () => {
@@ -17,5 +22,30 @@ describe('DEFAULT_SYSTEM_PROMPT', () => {
     expect(DEFAULT_SYSTEM_PROMPT).not.toContain(
       '还不能直接执行创建/修改画布',
     );
+  });
+});
+
+describe('ensureDiagnosisSession', () => {
+  const session = (id: string): ChatSession => ({
+    id,
+    title: id,
+    messages: [],
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  it('prepends the fixed diagnosis session when persisted data lacks it', () => {
+    const result = ensureDiagnosisSession([session('user-session')]);
+
+    expect(result.map((item) => item.id)).toEqual([
+      DIAGNOSIS_SESSION_ID,
+      'user-session',
+    ]);
+  });
+
+  it('does not duplicate an existing diagnosis session', () => {
+    const sessions = [session(DIAGNOSIS_SESSION_ID), session('user-session')];
+
+    expect(ensureDiagnosisSession(sessions)).toBe(sessions);
   });
 });

@@ -41,7 +41,7 @@ export interface NodeInputCapability {
   selectionMode?: 'all' | 'selected';
   selectedUpstreamIds?: string[];
   upstreamOrder?: string[];
-  contentMode?: 'legacy' | 'smart' | 'structured' | 'summary' | 'full';
+  contentMode?: 'structured' | 'summary' | 'full';
   includeSupplementalSources?: boolean;
   maxInputChars?: number;
   oversizeStrategy?: 'error' | 'truncate' | 'summarize';
