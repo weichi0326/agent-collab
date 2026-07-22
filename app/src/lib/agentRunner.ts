@@ -73,6 +73,8 @@ export type {
 let activeNativeTasks = 0;
 let nativeTaskActivation: Promise<void> = Promise.resolve();
 let nativeTaskTransitions: Promise<void> = Promise.resolve();
+let nativeTaskLeaseTimer: ReturnType<typeof setInterval> | undefined;
+const NATIVE_TASK_LEASE_REFRESH_MS = 30_000;
 
 async function setNativeTaskRunning(running: boolean): Promise<void> {
   if (!isTauri()) return;
@@ -90,10 +92,24 @@ function queueNativeTaskState(running: boolean): Promise<void> {
   return nativeTaskTransitions;
 }
 
+function startNativeTaskLeaseRefresh(): void {
+  if (!isTauri() || nativeTaskLeaseTimer !== undefined) return;
+  nativeTaskLeaseTimer = setInterval(() => {
+    if (activeNativeTasks > 0) void queueNativeTaskState(true);
+  }, NATIVE_TASK_LEASE_REFRESH_MS);
+}
+
+function stopNativeTaskLeaseRefresh(): void {
+  if (nativeTaskLeaseTimer === undefined) return;
+  clearInterval(nativeTaskLeaseTimer);
+  nativeTaskLeaseTimer = undefined;
+}
+
 async function withNativeTaskGuard<T>(task: () => Promise<T>): Promise<T> {
   activeNativeTasks += 1;
   if (activeNativeTasks === 1) {
     nativeTaskActivation = queueNativeTaskState(true);
+    startNativeTaskLeaseRefresh();
   }
   await nativeTaskActivation;
   try {
@@ -101,6 +117,7 @@ async function withNativeTaskGuard<T>(task: () => Promise<T>): Promise<T> {
   } finally {
     activeNativeTasks = Math.max(0, activeNativeTasks - 1);
     if (activeNativeTasks === 0) {
+      stopNativeTaskLeaseRefresh();
       await nativeTaskActivation;
       if (activeNativeTasks === 0) {
         await queueNativeTaskState(false);
@@ -874,8 +891,38 @@ async function rerunCanvasNodeInternal(
   }
 }
 
+function artifactPathFromEnvelope(
+  envelope: Record<string, unknown>,
+  data: NodeOutput['structuredData'],
+): string | undefined {
+  const contentRef = data?.contentRef;
+  if (contentRef && typeof contentRef === 'object' && !Array.isArray(contentRef)) {
+    const path = (contentRef as Record<string, unknown>).path;
+    if (typeof path === 'string' && path.trim()) return path;
+  }
+  const artifact = envelope.artifact;
+  if (artifact && typeof artifact === 'object' && !Array.isArray(artifact)) {
+    const path = (artifact as Record<string, unknown>).path;
+    if (typeof path === 'string' && path.trim()) return path;
+  }
+  return undefined;
+}
+
+async function readTextArtifact(path: string, signal?: AbortSignal): Promise<string> {
+  const res = await executeTool(
+    'file',
+    { path, action: 'read', mode: 'text' },
+    signal,
+  );
+  const result = unwrapToolResult<{ content?: unknown }>(
+    res,
+    `读取上游正文产物失败：${path}`,
+  );
+  return typeof result.content === 'string' ? result.content : '';
+}
+
 // 从磁盘 data.json 恢复某已成功节点的输出(供子图重跑作上游输入用)。
-// data.json 是产物事实源: envelope.data=structuredData, rawReply=content, summary, node.label。
+// data.json 是索引事实源: envelope.data=structuredData, artifact/contentRef 指向正文产物。
 async function restoreNodeOutput(
   node: Node,
   signal?: AbortSignal,
@@ -909,13 +956,20 @@ async function restoreNodeOutput(
   const nodeMeta = envelope.node as { label?: unknown } | undefined;
   const label =
     typeof nodeMeta?.label === 'string' ? nodeMeta.label : nodeLabel(node);
+  const structuredData =
+    envelope.data && typeof envelope.data === 'object'
+      ? (envelope.data as NodeOutput['structuredData'])
+      : undefined;
+  const contentPath = artifactPathFromEnvelope(envelope, structuredData);
+  const content = contentPath
+    ? await readTextArtifact(contentPath, signal)
+    : typeof envelope.rawReply === 'string'
+      ? envelope.rawReply
+      : '';
   return {
     label,
-    content: typeof envelope.rawReply === 'string' ? envelope.rawReply : '',
-    structuredData:
-      envelope.data && typeof envelope.data === 'object'
-        ? (envelope.data as NodeOutput['structuredData'])
-        : undefined,
+    content,
+    structuredData,
     summary: typeof envelope.summary === 'string' ? envelope.summary : undefined,
     nodeId: node.id,
   };

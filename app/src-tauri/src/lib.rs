@@ -6,11 +6,14 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, RunEvent};
+
+const TASK_RUNNING_LEASE: Duration = Duration::from_secs(120);
 
 #[derive(Default)]
 struct RuntimeState {
-    task_running: bool,
+    task_running_until: Option<Instant>,
 }
 
 struct AppRuntime(Mutex<RuntimeState>);
@@ -50,15 +53,22 @@ fn install_panic_log() {
 #[tauri::command]
 fn set_task_running(state: tauri::State<'_, AppRuntime>, running: bool) {
     let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
-    guard.task_running = running;
+    update_task_lease(&mut guard, running, Instant::now());
 }
 
 fn is_task_running(state: &AppRuntime) -> bool {
+    let guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    task_running_at(&guard, Instant::now())
+}
+
+fn update_task_lease(state: &mut RuntimeState, running: bool, now: Instant) {
+    state.task_running_until = running.then_some(now + TASK_RUNNING_LEASE);
+}
+
+fn task_running_at(state: &RuntimeState, now: Instant) -> bool {
     state
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .task_running
+        .task_running_until
+        .is_some_and(|expires_at| expires_at > now)
 }
 
 /// 构建 Rust 侧日志插件：落盘到项目 `logs/tauri.log`（与 v2.88 的 python.log 同目录），
@@ -78,6 +88,43 @@ fn build_log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         }));
     }
     builder.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_running_lease_expires_without_refresh() {
+        let started_at = Instant::now();
+        let mut state = RuntimeState::default();
+        update_task_lease(&mut state, true, started_at);
+
+        assert!(task_running_at(
+            &state,
+            started_at + TASK_RUNNING_LEASE - Duration::from_secs(1)
+        ));
+        assert!(!task_running_at(&state, started_at + TASK_RUNNING_LEASE));
+    }
+
+    #[test]
+    fn task_running_lease_refresh_and_release_are_explicit() {
+        let started_at = Instant::now();
+        let mut state = RuntimeState::default();
+        update_task_lease(&mut state, true, started_at);
+        update_task_lease(&mut state, true, started_at + Duration::from_secs(60));
+
+        assert!(task_running_at(
+            &state,
+            started_at + TASK_RUNNING_LEASE + Duration::from_secs(30)
+        ));
+
+        update_task_lease(&mut state, false, started_at + Duration::from_secs(90));
+        assert!(!task_running_at(
+            &state,
+            started_at + Duration::from_secs(90)
+        ));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -101,6 +148,7 @@ pub fn run() {
     builder
         .plugin(build_log_plugin())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .manage(PythonProcess(Mutex::new(PythonState::default())))
@@ -159,6 +207,8 @@ pub fn run() {
             storage::open_output_dir,
             storage::system_snapshot,
             storage::open_system_directory,
+            storage::scan_cleanable_app_data,
+            storage::clear_selected_app_data,
             storage::path_exists,
             storage::open_path,
             storage::list_output_reports,

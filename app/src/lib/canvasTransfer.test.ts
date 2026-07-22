@@ -134,7 +134,7 @@ describe('canvas agent capability transfer', () => {
                 selectionMode: 'selected',
                 selectedUpstreamIds: ['source'],
                 upstreamOrder: ['source'],
-                contentMode: 'smart',
+                contentMode: 'summary',
               },
               generation: {
                 enabled: true,
@@ -157,7 +157,7 @@ describe('canvas agent capability transfer', () => {
       enabled: true,
       selectedUpstreamIds: [sourceId],
       upstreamOrder: [sourceId],
-      contentMode: 'smart',
+      contentMode: 'summary',
     });
     expect(capabilities?.generation).toMatchObject({
       enabled: true,

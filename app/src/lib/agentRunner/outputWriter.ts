@@ -252,7 +252,7 @@ export async function persistOutput(
     path = resultPath;
   }
   const summary = buildOutputSummary(outputContent, label, format, structuredOutput);
-  const structuredData = structuredOutputForFormat(outputContent, label, format, structuredOutput);
+  const structuredData = structuredOutputForFormat(label, format, structuredOutput, path);
   assertCustomSchema(structuredData, outputSchema, label, '输出');
   if (!(format === 'markdown' && outputSchema)) {
     assertStructuredSchema(structuredData, label, format);
@@ -269,7 +269,6 @@ export async function persistOutput(
     artifactName: fileName,
     artifactPath: path,
     data: structuredData,
-    rawReply: content,
   });
   const dataEnvelopeText = JSON.stringify(dataEnvelope, null, 2);
   assertOutputSize(dataEnvelopeText, label, '结构化数据');

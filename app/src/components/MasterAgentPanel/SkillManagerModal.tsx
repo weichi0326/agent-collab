@@ -18,6 +18,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { useJiziSkillSettingsStore } from '../../stores/jiziSkillStore';
 import { useJiziSkillUsageStore } from '../../stores/jiziSkillUsageStore';
 import { ImportSkillModal } from './ImportSkillModal';
+import { skillRemovalCopy } from './skillRemoval';
 import {
   generatedSkillId,
   normalizeSkillId,
@@ -229,19 +230,18 @@ export function SkillManagerModal({ open, onClose }: SkillManagerModalProps) {
   const removeOrRestore = (skill: JiziSkill) => {
     const builtin = isBuiltinSkill(skill);
     const restore = builtin && hasSkillOverride(skill);
+    const copy = skillRemovalCopy(skill, restore);
     modal.confirm({
-      title: restore ? '恢复内置 Skill' : '删除 Skill',
-      content: restore
-        ? `将删除「${skill.title}」的用户覆盖版本，并恢复应用内置内容。`
-        : `确定永久删除「${skill.title}」吗？`,
-      okText: restore ? '恢复内置版本' : '删除',
+      title: copy.title,
+      content: copy.content,
+      okText: copy.okText,
       okType: restore ? 'primary' : 'danger',
       cancelText: '取消',
       onOk: async () => {
         await deleteJiziSkill(skill.id);
         setSkillEnabled(skill.id, true);
         if (!restore) removeUsage(skill.id);
-        message.success(restore ? '已恢复内置版本' : 'Skill 已删除');
+        message.success(restore ? '已恢复内置版本' : 'Skill 已移除');
         await refreshSkills();
       },
     });
@@ -427,12 +427,14 @@ export function SkillManagerModal({ open, onClose }: SkillManagerModalProps) {
                       <Button icon={<EditOutlined />} onClick={() => openEdit(activeSkill)} />
                     </Tooltip>
                     {(!isBuiltinSkill(activeSkill) || hasSkillOverride(activeSkill)) && (
-                      <Tooltip title={isBuiltinSkill(activeSkill) ? '恢复内置版本' : '删除 Skill'}>
+                      <Tooltip title={isBuiltinSkill(activeSkill) ? '移除用户覆盖并恢复内置版本' : '移除 Skill'}>
                         <Button
                           danger={!isBuiltinSkill(activeSkill)}
                           icon={isBuiltinSkill(activeSkill) ? <ReloadOutlined /> : <DeleteOutlined />}
                           onClick={() => removeOrRestore(activeSkill)}
-                        />
+                        >
+                          {isBuiltinSkill(activeSkill) ? '恢复内置' : '移除'}
+                        </Button>
                       </Tooltip>
                     )}
                   </div>

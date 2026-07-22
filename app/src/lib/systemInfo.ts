@@ -5,6 +5,17 @@ export const TAURI_VERSION = '2.11.3';
 
 export type SystemDirectoryKind = 'data' | 'app_data' | 'output' | 'log';
 
+export type CleanableItemId =
+  | 'outputs'
+  | 'logs'
+  | 'runtime'
+  | 'ui'
+  | 'canvas_agents'
+  | 'jizi'
+  | 'tools_app_data'
+  | 'user_skills'
+  | 'model_search';
+
 export interface DirectoryUsage {
   bytes: number;
   complete: boolean;
@@ -35,6 +46,26 @@ export interface SystemSnapshot {
   checks: SystemCheck[];
 }
 
+export interface CleanableItem {
+  id: CleanableItemId;
+  label: string;
+  description: string;
+  impact: string;
+  path: string;
+  usage: DirectoryUsage;
+  important: boolean;
+  defaultSelected: boolean;
+  exists: boolean;
+}
+
+export interface CleanableScan {
+  items: CleanableItem[];
+}
+
+export interface ClearSelectedAppDataResult {
+  cleared: CleanableItemId[];
+}
+
 export function isDesktopSystemInfoAvailable(): boolean {
   return isTauri();
 }
@@ -51,6 +82,23 @@ export async function openSystemDirectory(kind: SystemDirectoryKind): Promise<vo
     throw new Error('目录入口仅在桌面应用中可用');
   }
   await invoke('open_system_directory', { kind });
+}
+export async function scanCleanableAppData(): Promise<CleanableScan> {
+  if (!isTauri()) {
+    throw new Error('数据清理仅在桌面应用中可用');
+  }
+  return invoke<CleanableScan>('scan_cleanable_app_data');
+}
+
+export async function clearSelectedAppData(
+  itemIds: CleanableItemId[],
+): Promise<ClearSelectedAppDataResult> {
+  if (!isTauri()) {
+    throw new Error('数据清理仅在桌面应用中可用');
+  }
+  return invoke<ClearSelectedAppDataResult>('clear_selected_app_data', {
+    input: { itemIds },
+  });
 }
 
 export function formatByteSize(bytes: number): string {

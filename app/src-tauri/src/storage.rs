@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Manager;
+use tauri_plugin_fs::FsExt;
 
 // M12 修复：value 大小上限（10 MB），防止单次写盘超大 JSON 导致磁盘耗尽
 const MAX_VALUE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
@@ -75,6 +76,36 @@ pub struct SystemSnapshot {
     output_usage: DirectoryUsage,
     log_usage: DirectoryUsage,
     checks: Vec<SystemCheck>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanableItem {
+    id: String,
+    label: String,
+    description: String,
+    impact: String,
+    path: String,
+    usage: DirectoryUsage,
+    important: bool,
+    default_selected: bool,
+    exists: bool,
+}
+
+#[derive(Serialize)]
+pub struct CleanableScan {
+    items: Vec<CleanableItem>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearSelectedAppDataInput {
+    item_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct ClearSelectedAppDataResult {
+    cleared: Vec<String>,
 }
 
 // 数据根目录:所有 store 的 JSON 都存在这里,随项目文件夹迁移。
@@ -519,6 +550,284 @@ pub async fn system_snapshot(app: tauri::AppHandle) -> Result<SystemSnapshot, St
         .map_err(|error| format!("系统快照任务失败：{error}"))?
 }
 
+fn clear_directory_contents(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        fs::create_dir_all(path).map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let target = entry.path();
+        if target.is_dir() {
+            fs::remove_dir_all(&target).map_err(|error| error.to_string())?;
+        } else {
+            fs::remove_file(&target).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_file_if_exists(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn remove_named_data_files(data_dir: &Path, names: &[&str]) -> Result<(), String> {
+    for name in names {
+        remove_file_if_exists(&data_dir.join(name))?;
+        remove_file_if_exists(&data_dir.join(name).with_extension("bak"))?;
+    }
+    Ok(())
+}
+
+fn combined_usage(paths: &[PathBuf]) -> DirectoryUsage {
+    let mut bytes = 0_u64;
+    let mut complete = true;
+    let mut details = Vec::new();
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        let usage = directory_usage(path);
+        add_directory_usage_bytes(&mut bytes, usage.bytes, &mut complete, &mut details);
+        if !usage.complete {
+            mark_directory_usage_incomplete(&mut complete, &mut details, usage.detail);
+        }
+    }
+    DirectoryUsage {
+        bytes,
+        complete,
+        detail: if complete {
+            "统计完整".to_string()
+        } else {
+            details.join("；")
+        },
+    }
+}
+
+fn has_existing_path(paths: &[PathBuf]) -> bool {
+    paths.iter().any(|path| path.exists())
+}
+
+fn cleanable_item(
+    id: &str,
+    label: &str,
+    description: &str,
+    impact: &str,
+    paths: Vec<PathBuf>,
+    important: bool,
+    default_selected: bool,
+) -> Result<CleanableItem, String> {
+    Ok(CleanableItem {
+        id: id.to_string(),
+        label: label.to_string(),
+        description: description.to_string(),
+        impact: impact.to_string(),
+        path: paths
+            .iter()
+            .map(|path| path_to_string(path))
+            .collect::<Result<Vec<_>, _>>()?
+            .join("；"),
+        usage: combined_usage(&paths),
+        important,
+        default_selected,
+        exists: has_existing_path(&paths),
+    })
+}
+
+fn build_cleanable_scan(base: &Path, app_data_dir: &Path) -> Result<CleanableScan, String> {
+    let data_dir = base.join("data");
+    let output_dir = base.join("outputs");
+    let log_dir = base.join("logs");
+    Ok(CleanableScan {
+        items: vec![
+            cleanable_item(
+                "outputs",
+                "任务产物",
+                "清理任务生成的报告、正文产物和附件文件。",
+                "已生成的报告、正文和附件将无法继续查看。",
+                vec![output_dir],
+                false,
+                true,
+            )?,
+            cleanable_item(
+                "logs",
+                "运行日志",
+                "清理应用运行日志和崩溃日志。",
+                "历史运行和崩溃排查记录将被删除。",
+                vec![log_dir, data_dir.join("crash.log")],
+                false,
+                true,
+            )?,
+            cleanable_item(
+                "runtime",
+                "运行历史与统计",
+                "清理 token 统计和运行临时状态。",
+                "历史 token 统计和运行状态记录将被删除。",
+                vec![data_dir.join("multi-agent-token-stats.json")],
+                false,
+                true,
+            )?,
+            cleanable_item(
+                "ui",
+                "UI 与引导状态",
+                "清理面板状态、引导状态和非关键界面偏好。",
+                "面板布局、引导进度和非关键界面偏好将恢复默认。",
+                vec![
+                    data_dir.join("multi-agent-ui.json"),
+                    data_dir.join("multi-agent-onboarding.json"),
+                ],
+                false,
+                true,
+            )?,
+            cleanable_item(
+                "canvas_agents",
+                "画布与 Agent 节点",
+                "清理画布、Agent 节点库和对应备份。",
+                "现有画布和自定义 Agent 节点将被删除，无法继续原有工作流。",
+                vec![
+                    data_dir.join("multi-agent-canvas.json"),
+                    data_dir.join("multi-agent-canvas.bak"),
+                    data_dir.join("multi-agent-agents.json"),
+                    data_dir.join("multi-agent-agents.bak"),
+                ],
+                true,
+                false,
+            )?,
+            cleanable_item(
+                "jizi",
+                "姬子数据",
+                "清理姬子会话、编排状态和 Skill 清单。",
+                "姬子会话、编排状态和 Skill 启用清单将被删除。",
+                vec![
+                    data_dir.join("multi-agent-master.json"),
+                    data_dir.join("multi-agent-master.bak"),
+                    data_dir.join("multi-agent-orchestrator.json"),
+                    data_dir.join("multi-agent-orchestrator.bak"),
+                    data_dir.join("multi-agent-jizi-skills.json"),
+                    data_dir.join("multi-agent-jizi-skills.bak"),
+                ],
+                true,
+                false,
+            )?,
+            cleanable_item(
+                "tools_app_data",
+                "自定义工具",
+                "清理自定义工具配置、已安装或生成的工具及其依赖。",
+                "已安装或生成的自定义工具及其依赖将不可用；内置工具不受影响。",
+                vec![
+                    data_dir.join("multi-agent-tools.json"),
+                    data_dir.join("multi-agent-tools.bak"),
+                    app_data_dir.join("python-tools"),
+                ],
+                true,
+                false,
+            )?,
+            cleanable_item(
+                "user_skills",
+                "用户 Skill",
+                "清理用户创建、导入和覆盖的 Skill 文件。",
+                "用户创建、导入和覆盖的 Skill 将被删除；内置 Skill 会恢复默认内容。",
+                vec![app_data_dir.join("skills")],
+                true,
+                false,
+            )?,
+            cleanable_item(
+                "model_search",
+                "模型与搜索配置",
+                "清理模型 API、搜索 API、Key 和连接配置。",
+                "模型与搜索服务将无法调用，直到重新配置连接和 Key。",
+                vec![
+                    data_dir.join("multi-agent-models.json"),
+                    data_dir.join("multi-agent-models.bak"),
+                    data_dir.join("multi-agent-search.json"),
+                    data_dir.join("multi-agent-search.bak"),
+                ],
+                true,
+                false,
+            )?,
+        ],
+    })
+}
+
+fn clear_selected_app_data_impl(
+    base: &Path,
+    app_data_dir: &Path,
+    item_ids: &[&str],
+) -> Result<ClearSelectedAppDataResult, String> {
+    let data_dir = base.join("data");
+    let mut cleared = Vec::new();
+    for item_id in item_ids {
+        match *item_id {
+            "outputs" => clear_directory_contents(&base.join("outputs"))?,
+            "logs" => {
+                clear_directory_contents(&base.join("logs"))?;
+                remove_file_if_exists(&data_dir.join("crash.log"))?;
+            }
+            "runtime" => remove_named_data_files(&data_dir, &["multi-agent-token-stats.json"])?,
+            "ui" => remove_named_data_files(
+                &data_dir,
+                &["multi-agent-ui.json", "multi-agent-onboarding.json"],
+            )?,
+            "canvas_agents" => remove_named_data_files(
+                &data_dir,
+                &["multi-agent-canvas.json", "multi-agent-agents.json"],
+            )?,
+            "jizi" => remove_named_data_files(
+                &data_dir,
+                &[
+                    "multi-agent-master.json",
+                    "multi-agent-orchestrator.json",
+                    "multi-agent-jizi-skills.json",
+                ],
+            )?,
+            "tools_app_data" => {
+                remove_named_data_files(&data_dir, &["multi-agent-tools.json"])?;
+                clear_directory_contents(&app_data_dir.join("python-tools"))?;
+            }
+            "user_skills" => clear_directory_contents(&app_data_dir.join("skills"))?,
+            "model_search" => remove_named_data_files(
+                &data_dir,
+                &["multi-agent-models.json", "multi-agent-search.json"],
+            )?,
+            unknown => return Err(format!("未知清理分类：{unknown}")),
+        }
+        cleared.push((*item_id).to_string());
+    }
+    Ok(ClearSelectedAppDataResult { cleared })
+}
+
+#[tauri::command]
+pub fn scan_cleanable_app_data(app: tauri::AppHandle) -> Result<CleanableScan, String> {
+    let base = app_base_dir()?;
+    let app_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法定位应用数据目录：{error}"))?;
+    build_cleanable_scan(&base, &app_data_dir)
+}
+
+#[tauri::command]
+pub fn clear_selected_app_data(
+    input: ClearSelectedAppDataInput,
+    app: tauri::AppHandle,
+) -> Result<ClearSelectedAppDataResult, String> {
+    let base = app_base_dir()?;
+    let app_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法定位应用数据目录：{error}"))?;
+    let ids = input
+        .item_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    clear_selected_app_data_impl(&base, &app_data_dir, &ids)
+}
+
 fn resolve_system_directory(
     base: &Path,
     app_data_dir: &Path,
@@ -593,16 +902,32 @@ pub fn path_exists(path: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn open_path(path: String) -> Result<(), String> {
-    let target = PathBuf::from(&path);
-    if !target.exists() {
-        return Err(format!("文件不存在: {path}"));
+pub fn open_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|_| format!("文件不存在: {path}"))?;
+    let app_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法定位应用数据目录：{error}"))?;
+    let base = app_base_dir()?;
+    ensure_path_under_roots(
+        &target,
+        &[
+            base.join("data"),
+            base.join("outputs"),
+            base.join("logs"),
+            app_data_dir,
+        ],
+    )?;
+    if !is_openable_app_path(&target) {
+        return Err("该文件类型不允许由应用打开".to_string());
     }
 
     let mut cmd = if cfg!(target_os = "windows") {
         if target.is_dir() {
             let mut command = Command::new("explorer.exe");
-            command.arg(&path);
+            command.arg(&target);
             command
         } else {
             let mut command = Command::new("powershell");
@@ -612,7 +937,7 @@ pub fn open_path(path: String) -> Result<(), String> {
                     "-Command",
                     "Start-Process -LiteralPath $env:AGENT_OPEN_PATH",
                 ])
-                .env("AGENT_OPEN_PATH", &path);
+                .env("AGENT_OPEN_PATH", &target);
             command
         }
     } else if cfg!(target_os = "macos") {
@@ -628,6 +953,43 @@ pub fn open_path(path: String) -> Result<(), String> {
     cmd.spawn()
         .map(|_| ())
         .map_err(|e| format!("打开文件失败: {e}"))
+}
+
+fn ensure_path_under_roots(target: &Path, roots: &[PathBuf]) -> Result<(), String> {
+    for root in roots {
+        if let Ok(root) = root.canonicalize() {
+            if target.starts_with(root) {
+                return Ok(());
+            }
+        }
+    }
+    Err("拒绝打开应用目录之外的路径".to_string())
+}
+
+fn is_openable_app_path(path: &Path) -> bool {
+    if path.is_dir() {
+        return true;
+    }
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "md" | "markdown"
+                    | "txt"
+                    | "json"
+                    | "csv"
+                    | "pdf"
+                    | "docx"
+                    | "xlsx"
+                    | "html"
+                    | "png"
+                    | "jpg"
+                    | "jpeg"
+                    | "gif"
+                    | "webp"
+            )
+        })
 }
 
 fn path_to_string(path: &Path) -> Result<String, String> {
@@ -1008,20 +1370,47 @@ pub fn delete_jizi_skill_file(id: String) -> Result<(), String> {
     Ok(())
 }
 
-// 读文本文件:用于 Skill 导入时读取用户通过对话框选择的 .md 文件。
-// 路径来自原生对话框,用户主动选择,无注入风险。限 2MB 防误选大文件。
+fn is_markdown_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
+        })
+}
+
+// 用于 Skill 导入，只读取用户通过原生对话框明确选择的 Markdown 文件。
 #[tauri::command]
-pub fn read_text_file(path: String) -> Result<String, String> {
+pub fn read_text_file(app: tauri::AppHandle, path: String) -> Result<String, String> {
     const MAX: usize = 2 * 1024 * 1024;
-    let p = Path::new(&path);
-    if !p.exists() {
-        return Err("文件不存在".to_string());
+    let path = PathBuf::from(path)
+        .canonicalize()
+        .map_err(|_| "文件不存在".to_string())?;
+    if !is_markdown_path(&path) {
+        return Err("仅支持导入 Markdown 文件".to_string());
     }
-    let meta = fs::metadata(p).map_err(|e| e.to_string())?;
-    if meta.len() as usize > MAX {
+    let scope = app
+        .try_fs_scope()
+        .ok_or_else(|| "文件访问权限未初始化".to_string())?;
+    if !scope.is_allowed(&path) {
+        return Err("请通过文件选择器选择要导入的文件".to_string());
+    }
+
+    let mut file = fs::File::open(&path).map_err(|error| error.to_string())?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("所选路径不是普通文件".to_string());
+    }
+    let mut bytes = Vec::new();
+    Read::take(&mut file, (MAX + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > MAX {
         return Err("文件过大，请控制在 2MB 以内".to_string());
     }
-    fs::read_to_string(p).map_err(|e| e.to_string())
+    String::from_utf8(bytes).map_err(|_| "文件不是有效的 UTF-8 文本".to_string())
 }
 
 fn build_jizi_skill_artifacts(
@@ -1305,6 +1694,40 @@ mod tests {
     }
 
     #[test]
+    fn open_path_roots_accept_nested_paths_and_reject_siblings() {
+        let root = temp_dir("open-path-root");
+        let allowed = root.join("allowed");
+        let nested = allowed.join("nested");
+        let sibling = root.join("sibling");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&sibling).unwrap();
+
+        let nested = nested.canonicalize().unwrap();
+        assert!(ensure_path_under_roots(&nested, std::slice::from_ref(&allowed)).is_ok());
+        assert!(ensure_path_under_roots(&sibling.canonicalize().unwrap(), &[allowed]).is_err());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn skill_import_only_accepts_markdown_extensions() {
+        assert!(is_markdown_path(Path::new("skill.md")));
+        assert!(is_markdown_path(Path::new("skill.MARKDOWN")));
+        assert!(!is_markdown_path(Path::new("skill.txt")));
+        assert!(!is_markdown_path(Path::new("skill.md.exe")));
+    }
+
+    #[test]
+    fn open_path_rejects_executable_file_types() {
+        assert!(is_openable_app_path(Path::new("report.md")));
+        assert!(is_openable_app_path(Path::new("workbook.XLSX")));
+        assert!(!is_openable_app_path(Path::new("payload.exe")));
+        assert!(!is_openable_app_path(Path::new("payload.ps1")));
+        assert!(!is_openable_app_path(Path::new("payload.lnk")));
+        assert!(!is_openable_app_path(Path::new("no-extension")));
+    }
+
+    #[test]
     fn directory_write_probe_is_removed_after_success() {
         let root = temp_dir("system-snapshot-write-probe");
 
@@ -1368,6 +1791,165 @@ mod tests {
         assert_eq!(fs::read_dir(root.as_path()).unwrap().count(), 0);
 
         fs::remove_dir_all(root.as_path()).unwrap();
+    }
+
+    #[test]
+    fn cleanable_scan_marks_defaults_and_important_categories() {
+        let root = temp_dir("cleanable_scan");
+        let data = root.join("data");
+        let outputs = root.join("outputs");
+        let logs = root.join("logs");
+        let app_data = root.join("app-data");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&outputs).unwrap();
+        fs::create_dir_all(&logs).unwrap();
+        fs::create_dir_all(&app_data).unwrap();
+        fs::write(outputs.join("report.md"), "output").unwrap();
+        fs::write(logs.join("tauri.log"), "log").unwrap();
+        fs::write(data.join("multi-agent-token-stats.json"), "stats").unwrap();
+        fs::write(data.join("multi-agent-ui.json"), "ui").unwrap();
+        fs::write(data.join("multi-agent-canvas.json"), "canvas").unwrap();
+        fs::write(data.join("multi-agent-agents.json"), "agents").unwrap();
+        fs::write(data.join("multi-agent-master.json"), "master").unwrap();
+        fs::write(data.join("multi-agent-tools.json"), "tools").unwrap();
+        fs::write(data.join("multi-agent-models.json"), "models").unwrap();
+        fs::write(data.join("multi-agent-search.json"), "search").unwrap();
+        fs::create_dir_all(app_data.join("python-tools")).unwrap();
+        fs::create_dir_all(app_data.join("skills")).unwrap();
+        fs::write(app_data.join("python-tools/registry.json"), "tools").unwrap();
+        fs::write(app_data.join("skills/custom.md"), "skill").unwrap();
+        fs::write(app_data.join("extension-cache.json"), "cache").unwrap();
+
+        let scan = build_cleanable_scan(&root, &app_data).unwrap();
+
+        assert_eq!(scan.items.len(), 9);
+        for id in ["outputs", "logs", "runtime", "ui"] {
+            let item = scan.items.iter().find(|item| item.id == id).unwrap();
+            assert!(item.default_selected, "{id} 应默认选中");
+            assert!(!item.important, "{id} 不应标记重要");
+            assert!(item.exists, "{id} 应存在");
+        }
+        for id in [
+            "canvas_agents",
+            "jizi",
+            "tools_app_data",
+            "user_skills",
+            "model_search",
+        ] {
+            let item = scan.items.iter().find(|item| item.id == id).unwrap();
+            assert!(!item.default_selected, "{id} 不应默认选中");
+            assert!(item.important, "{id} 应标记重要");
+            assert!(item.exists, "{id} 应存在");
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clear_selected_tools_and_skills_preserves_other_app_data() {
+        let root = temp_dir("clear_selected_extensions");
+        let data = root.join("data");
+        let app_data = root.join("app-data");
+        let tools = app_data.join("python-tools");
+        let skills = app_data.join("skills");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&tools).unwrap();
+        fs::create_dir_all(&skills).unwrap();
+        fs::write(data.join("multi-agent-tools.json"), "tools").unwrap();
+        fs::write(tools.join("registry.json"), "registry").unwrap();
+        fs::write(skills.join("custom.md"), "skill").unwrap();
+        fs::write(app_data.join("future-data.json"), "keep").unwrap();
+
+        clear_selected_app_data_impl(&root, &app_data, &["tools_app_data"]).unwrap();
+
+        assert!(!data.join("multi-agent-tools.json").exists());
+        assert!(fs::read_dir(&tools).unwrap().next().is_none());
+        assert!(skills.join("custom.md").exists());
+        assert!(app_data.join("future-data.json").exists());
+
+        fs::write(tools.join("registry.json"), "registry").unwrap();
+        clear_selected_app_data_impl(&root, &app_data, &["user_skills"]).unwrap();
+
+        assert!(fs::read_dir(&skills).unwrap().next().is_none());
+        assert!(tools.join("registry.json").exists());
+        assert!(app_data.join("future-data.json").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clear_selected_app_data_removes_only_selected_categories() {
+        let root = temp_dir("clear_selected_outputs_logs");
+        let data = root.join("data");
+        let outputs = root.join("outputs");
+        let logs = root.join("logs");
+        let app_data = root.join("app-data");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&outputs).unwrap();
+        fs::create_dir_all(&logs).unwrap();
+        fs::create_dir_all(&app_data).unwrap();
+        fs::write(outputs.join("report.md"), "output").unwrap();
+        fs::write(logs.join("tauri.log"), "log").unwrap();
+        fs::write(data.join("crash.log"), "crash").unwrap();
+        fs::write(data.join("multi-agent-canvas.json"), "canvas").unwrap();
+        fs::write(data.join("multi-agent-models.json"), "models").unwrap();
+        fs::write(data.join("multi-agent-search.json"), "search").unwrap();
+
+        let result = clear_selected_app_data_impl(&root, &app_data, &["outputs", "logs"]).unwrap();
+
+        assert_eq!(
+            result.cleared,
+            vec!["outputs".to_string(), "logs".to_string()]
+        );
+        assert!(fs::read_dir(&outputs).unwrap().next().is_none());
+        assert!(fs::read_dir(&logs).unwrap().next().is_none());
+        assert!(!data.join("crash.log").exists());
+        assert!(data.join("multi-agent-canvas.json").exists());
+        assert!(data.join("multi-agent-models.json").exists());
+        assert!(data.join("multi-agent-search.json").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clear_selected_app_data_removes_important_categories_only_when_selected() {
+        let root = temp_dir("clear_selected_important");
+        let data = root.join("data");
+        let app_data = root.join("app-data");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&app_data).unwrap();
+        fs::write(data.join("multi-agent-canvas.json"), "canvas").unwrap();
+        fs::write(data.join("multi-agent-canvas.bak"), "canvas backup").unwrap();
+        fs::write(data.join("multi-agent-agents.json"), "agents").unwrap();
+        fs::write(data.join("multi-agent-models.json"), "models").unwrap();
+        fs::write(data.join("multi-agent-search.json"), "search").unwrap();
+
+        clear_selected_app_data_impl(&root, &app_data, &["canvas_agents"]).unwrap();
+
+        assert!(!data.join("multi-agent-canvas.json").exists());
+        assert!(!data.join("multi-agent-canvas.bak").exists());
+        assert!(!data.join("multi-agent-agents.json").exists());
+        assert!(data.join("multi-agent-models.json").exists());
+        assert!(data.join("multi-agent-search.json").exists());
+
+        clear_selected_app_data_impl(&root, &app_data, &["model_search"]).unwrap();
+
+        assert!(!data.join("multi-agent-models.json").exists());
+        assert!(!data.join("multi-agent-search.json").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clear_selected_app_data_rejects_unknown_category() {
+        let root = temp_dir("clear_selected_unknown");
+        let app_data = root.join("app-data");
+        fs::create_dir_all(&app_data).unwrap();
+
+        let error = clear_selected_app_data_impl(&root, &app_data, &["unknown"]).unwrap_err();
+
+        assert!(error.contains("未知清理分类"), "{error}");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

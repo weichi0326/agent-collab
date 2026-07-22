@@ -11,10 +11,12 @@ vi.mock('@tauri-apps/api/core', () => ({
 import {
   FRONTEND_VERSION,
   TAURI_VERSION,
+  clearSelectedAppData,
   formatByteSize,
   formatDirectoryUsage,
   openSystemDirectory,
   readableSystemError,
+  scanCleanableAppData,
 } from './systemInfo';
 
 describe('formatByteSize', () => {
@@ -41,6 +43,24 @@ describe('formatByteSize', () => {
     await openSystemDirectory('log');
 
     expect(invokeMock).toHaveBeenCalledWith('open_system_directory', { kind: 'log' });
+  });
+
+  it('scans cleanable app data through the categorized command', async () => {
+    invokeMock.mockResolvedValueOnce({ items: [] });
+
+    await scanCleanableAppData();
+
+    expect(invokeMock).toHaveBeenCalledWith('scan_cleanable_app_data');
+  });
+
+  it('clears selected app data categories through the selective command', async () => {
+    invokeMock.mockResolvedValueOnce({ cleared: ['outputs', 'logs'] });
+
+    await clearSelectedAppData(['outputs', 'logs']);
+
+    expect(invokeMock).toHaveBeenCalledWith('clear_selected_app_data', {
+      input: { itemIds: ['outputs', 'logs'] },
+    });
   });
 
   it('keeps displayed frontend and Tauri versions synchronized with manifests', () => {

@@ -63,18 +63,9 @@ function summarizeJsonOutput(data: JsonObject, format: AgentOutputFormat): strin
 }
 
 function summarizeTextOutput(content: string, label: string): string {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.replace(/[#>*`|_-]/g, ' ').replace(/\s+/g, ' ').trim())
-    .filter((line) => line.length >= 4);
-  const picks: string[] = [];
-  for (const line of lines) {
-    if (picks.some((item) => item === line)) continue;
-    picks.push(line);
-    if (picks.length >= 4) break;
-  }
-  const summary = picks.join('；');
-  return compactText(summary || `${label} 已生成 ${content.length} 字内容`, OUTPUT_SUMMARY_MAX_CHARS);
+  const h1 = content.match(/^#\s+(.+?)\s*$/m);
+  const title = h1?.[1]?.trim() || label;
+  return compactText(`${title} 已生成 ${content.length} 字内容`, OUTPUT_SUMMARY_MAX_CHARS);
 }
 
 export function buildOutputSummary(
@@ -90,17 +81,18 @@ export function buildOutputSummary(
 }
 
 export function structuredOutputForFormat(
-  content: string,
   label: string,
   format: AgentOutputFormat,
   structured?: JsonObject,
+  artifactPath?: string,
 ): JsonObject {
   if (structured) return structured;
   return {
     title: label,
     outputFormat: format,
-    text: content,
-    paragraphs: markdownToParagraphs(content),
+    contentRef: artifactPath
+      ? { kind: 'artifact', path: artifactPath }
+      : undefined,
   };
 }
 
@@ -114,10 +106,9 @@ export function buildStructuredEnvelope(params: {
   artifactName: string;
   artifactPath: string;
   data: JsonObject;
-  rawReply: string;
 }): JsonObject {
   return {
-    version: '1.0',
+    version: '2.0',
     kind: 'agent-node-output',
     canvas: {
       id: params.canvas.id,
@@ -137,7 +128,6 @@ export function buildStructuredEnvelope(params: {
       path: params.artifactPath,
     },
     data: params.data,
-    rawReply: params.rawReply,
   };
 }
 
@@ -191,7 +181,7 @@ export function expectedJsonShape(format: AgentOutputFormat): string {
       return '{"title":"中心主题","children":[{"title":"分支","children":[{"title":"子分支"}]}]}';
     case 'markdown':
     default:
-      return '{"title":"标题","text":"正文","paragraphs":["段落"]}';
+      return '{"title":"标题","outputFormat":"markdown","contentRef":{"kind":"artifact","path":"正文产物路径"}}';
   }
 }
 
@@ -254,8 +244,11 @@ export function validateStructuredSchema(
   const errors: string[] = [];
   if (format === 'markdown') {
     if (!nonEmptyString(data.title)) errors.push('title 必须是非空字符串');
-    if (!nonEmptyString(data.text)) errors.push('text 必须是非空字符串');
-    validateStringArray(data.paragraphs, 'paragraphs', errors, true);
+    const ref = data.contentRef;
+    const refPath = ref && typeof ref === 'object' && !Array.isArray(ref)
+      ? (ref as JsonObject).path
+      : undefined;
+    if (!nonEmptyString(refPath)) errors.push('contentRef.path 必须是非空字符串');
     return errors;
   }
 
