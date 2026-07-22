@@ -209,7 +209,7 @@ function EnsurePortsReady() {
   $frontListeners = GetTcpListeners 5173
   if ($frontListeners.Count -gt 0) {
     $body = GetText 'http://127.0.0.1:5173/'
-    if ($body -notlike '*/src/main.tsx*' -or $body -notlike '*多 Agent 协同工具*') {
+    if ($body -notlike '*/src/main.tsx*' -or $body -notlike '*multi-agent-tool*') {
       $pids = ($frontListeners | Select-Object -ExpandProperty OwningProcess -Unique) -join ', '
       throw "Port 5173 is occupied by another service (PID: $pids). Close it and start again."
     }

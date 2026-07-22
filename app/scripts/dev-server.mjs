@@ -88,7 +88,7 @@ process.on('unhandledRejection', (error) => {
 
 try {
   const existing = await fetchRoot();
-  if (existing.includes('/src/main.tsx') && existing.includes('多 Agent 协同工具')) {
+  if (existing.includes('/src/main.tsx') && existing.includes('multi-agent-tool')) {
     console.log(`[dev-server] Reusing existing Vite server at ${DEV_URL}`);
     process.exit(0);
   }
