@@ -583,6 +583,52 @@ fn remove_named_data_files(data_dir: &Path, names: &[&str]) -> Result<(), String
     Ok(())
 }
 
+fn is_fictionist_data_file_name(name: &str) -> bool {
+    name.starts_with("multi-agent-fictionist-")
+        && [".json", ".bak", ".tmp"]
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
+}
+
+fn fictionist_data_files(data_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    if !data_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(data_dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            continue;
+        }
+        let name = entry.file_name();
+        if name.to_str().is_some_and(is_fictionist_data_file_name) {
+            paths.push(entry.path());
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+fn fictionist_cleanable_paths(data_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let paths = fictionist_data_files(data_dir)?;
+    if paths.is_empty() {
+        Ok(vec![data_dir.join("multi-agent-fictionist-*.json")])
+    } else {
+        Ok(paths)
+    }
+}
+
+fn remove_fictionist_data_files(data_dir: &Path) -> Result<(), String> {
+    for path in fictionist_data_files(data_dir)? {
+        remove_file_if_exists(&path)?;
+    }
+    Ok(())
+}
+
 fn combined_usage(paths: &[PathBuf]) -> DirectoryUsage {
     let mut bytes = 0_u64;
     let mut complete = true;
@@ -642,6 +688,7 @@ fn build_cleanable_scan(base: &Path, app_data_dir: &Path) -> Result<CleanableSca
     let data_dir = base.join("data");
     let output_dir = base.join("outputs");
     let log_dir = base.join("logs");
+    let fictionist_paths = fictionist_cleanable_paths(&data_dir)?;
     Ok(CleanableScan {
         items: vec![
             cleanable_item(
@@ -694,6 +741,15 @@ fn build_cleanable_scan(base: &Path, app_data_dir: &Path) -> Result<CleanableSca
                     data_dir.join("multi-agent-agents.json"),
                     data_dir.join("multi-agent-agents.bak"),
                 ],
+                true,
+                false,
+            )?,
+            cleanable_item(
+                "fictionist",
+                "小说家作品",
+                "清理小说作品索引、章节正文、当前选择及其备份和临时文件。",
+                "本地小说作品、章节和正文将被删除，无法继续原有写作。",
+                fictionist_paths,
                 true,
                 false,
             )?,
@@ -776,6 +832,7 @@ fn clear_selected_app_data_impl(
                 &data_dir,
                 &["multi-agent-canvas.json", "multi-agent-agents.json"],
             )?,
+            "fictionist" => remove_fictionist_data_files(&data_dir)?,
             "jizi" => remove_named_data_files(
                 &data_dir,
                 &[
@@ -1810,6 +1867,7 @@ mod tests {
         fs::write(data.join("multi-agent-ui.json"), "ui").unwrap();
         fs::write(data.join("multi-agent-canvas.json"), "canvas").unwrap();
         fs::write(data.join("multi-agent-agents.json"), "agents").unwrap();
+        fs::write(data.join("multi-agent-fictionist-index.json"), "fictionist").unwrap();
         fs::write(data.join("multi-agent-master.json"), "master").unwrap();
         fs::write(data.join("multi-agent-tools.json"), "tools").unwrap();
         fs::write(data.join("multi-agent-models.json"), "models").unwrap();
@@ -1822,7 +1880,7 @@ mod tests {
 
         let scan = build_cleanable_scan(&root, &app_data).unwrap();
 
-        assert_eq!(scan.items.len(), 9);
+        assert_eq!(scan.items.len(), 10);
         for id in ["outputs", "logs", "runtime", "ui"] {
             let item = scan.items.iter().find(|item| item.id == id).unwrap();
             assert!(item.default_selected, "{id} 应默认选中");
@@ -1831,6 +1889,7 @@ mod tests {
         }
         for id in [
             "canvas_agents",
+            "fictionist",
             "jizi",
             "tools_app_data",
             "user_skills",
@@ -1841,6 +1900,48 @@ mod tests {
             assert!(item.important, "{id} 应标记重要");
             assert!(item.exists, "{id} 应存在");
         }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cleanable_scan_includes_fictionist_data() {
+        let root = temp_dir("cleanable_scan_fictionist");
+        let data = root.join("data");
+        let app_data = root.join("app-data");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&app_data).unwrap();
+        let fictionist_files = [
+            "multi-agent-fictionist-index.json",
+            "multi-agent-fictionist-chapter-chapter-1.json",
+            "multi-agent-fictionist-index.bak",
+            "multi-agent-fictionist-chapter-chapter-1.12-3-4.tmp",
+        ];
+        for name in fictionist_files {
+            fs::write(data.join(name), "fictionist").unwrap();
+        }
+        fs::write(data.join("multi-agent-canvas.json"), "canvas").unwrap();
+        fs::write(data.join("multi-agent-fictionist-keep.txt"), "not managed").unwrap();
+
+        let scan = build_cleanable_scan(&root, &app_data).unwrap();
+        let item = scan
+            .items
+            .iter()
+            .find(|item| item.id == "fictionist")
+            .unwrap();
+
+        assert!(item.exists);
+        assert!(item.important);
+        assert!(!item.default_selected);
+        assert_eq!(item.usage.bytes, 40);
+
+        clear_selected_app_data_impl(&root, &app_data, &["fictionist"]).unwrap();
+
+        for name in fictionist_files {
+            assert!(!data.join(name).exists(), "{name} 应被清理");
+        }
+        assert!(data.join("multi-agent-canvas.json").exists());
+        assert!(data.join("multi-agent-fictionist-keep.txt").exists());
 
         fs::remove_dir_all(root).unwrap();
     }

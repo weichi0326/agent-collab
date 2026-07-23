@@ -24,7 +24,12 @@ export const PROJECT_STORAGE_KEYS = [
 export async function clearProjectStorageData(): Promise<void> {
   if (inTauri) {
     await Promise.all(
-      PROJECT_STORAGE_KEYS.map((key) => invoke('storage_remove', { key })),
+      [
+        ...PROJECT_STORAGE_KEYS.map((key) => invoke('storage_remove', { key })),
+        invoke('clear_selected_app_data', {
+          input: { itemIds: ['fictionist'] },
+        }),
+      ],
     );
     return;
   }

@@ -54,12 +54,12 @@ describe('formatByteSize', () => {
   });
 
   it('clears selected app data categories through the selective command', async () => {
-    invokeMock.mockResolvedValueOnce({ cleared: ['outputs', 'logs'] });
+    invokeMock.mockResolvedValueOnce({ cleared: ['fictionist'] });
 
-    await clearSelectedAppData(['outputs', 'logs']);
+    await clearSelectedAppData(['fictionist']);
 
     expect(invokeMock).toHaveBeenCalledWith('clear_selected_app_data', {
-      input: { itemIds: ['outputs', 'logs'] },
+      input: { itemIds: ['fictionist'] },
     });
   });
 

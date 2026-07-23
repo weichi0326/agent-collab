@@ -11,6 +11,7 @@ export type CleanableItemId =
   | 'runtime'
   | 'ui'
   | 'canvas_agents'
+  | 'fictionist'
   | 'jizi'
   | 'tools_app_data'
   | 'user_skills'
