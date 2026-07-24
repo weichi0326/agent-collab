@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { openLocalPath } from '../../lib/outputDirectory';
 import { cleanupLocationOptions } from './cleanupLocation';
+import { reconcileClearedAppData } from './systemDataCleanup';
 import {
   EXPECTED_PYTHON_SERVICE_VERSION,
   getHealth,
@@ -313,6 +314,7 @@ export default function SystemDataSettingsPanel() {
       setClearing(true);
       try {
         const result = await clearSelectedAppData(selectedCleanupIds);
+        reconcileClearedAppData(result.cleared);
         message.success(`已清理 ${result.cleared.length} 类内容`);
         await handleScanCleanup();
         await refresh();

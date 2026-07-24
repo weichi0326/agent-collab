@@ -747,7 +747,7 @@ fn build_cleanable_scan(base: &Path, app_data_dir: &Path) -> Result<CleanableSca
             cleanable_item(
                 "fictionist",
                 "小说家作品",
-                "清理小说作品索引、章节正文、当前选择及其备份和临时文件。",
+                "清理小说作品索引、章节正文、专业任务上下文、关联画布及其备份和临时文件。",
                 "本地小说作品、章节和正文将被删除，无法继续原有写作。",
                 fictionist_paths,
                 true,

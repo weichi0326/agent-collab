@@ -95,6 +95,7 @@ type AgentPatch = Partial<AgentDraft>;
 
 interface AgentState {
   agents: AgentDef[];
+  clearAgents: () => void;
   addAgent: (draft: AgentDraft) => string; // 返回新 id
   updateAgent: (id: string, patch: AgentPatch) => void;
   removeAgent: (id: string) => void;
@@ -106,6 +107,8 @@ export const useAgentStore = create<AgentState>()(
   persist(
     (set) => ({
       agents: [],
+
+      clearAgents: () => set({ agents: [] }),
 
       addAgent: (draft) => {
         const id = uid('agent');

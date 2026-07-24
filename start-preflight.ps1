@@ -93,7 +93,18 @@ function GetTcpListeners($Port) {
   try {
     return @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop)
   } catch {
-    return @()
+    # Get-NetTCPConnection may require permissions that a normal desktop launch
+    # does not have. netstat still exposes the listening PID without elevation.
+    $pattern = "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$"
+    return @(
+      netstat -ano -p tcp |
+        ForEach-Object {
+          $match = [regex]::Match($_, $pattern, 'IgnoreCase')
+          if ($match.Success) {
+            [pscustomobject]@{ OwningProcess = [int]$match.Groups[1].Value }
+          }
+        }
+    )
   }
 }
 
@@ -144,6 +155,39 @@ function TestBackendProcessIdentity($ProcessId) {
     $actualPort -eq '18081' -and
     $actualAppDir -eq $expectedAppDir
   )
+}
+
+function TestFrontendProcessIdentity($ProcessId, $PageBody) {
+  if ($PageBody -notlike '*/src/main.tsx*' -or $PageBody -notlike '*multi-agent-tool*') {
+    return $false
+  }
+  try {
+    $process = Get-Process -Id $ProcessId -ErrorAction Stop
+    return $process.ProcessName -eq 'node'
+  } catch {
+    return $false
+  }
+}
+
+function StopFrontendListeners($Listeners, $PageBody) {
+  $listenerPids = @($Listeners | Select-Object -ExpandProperty OwningProcess -Unique)
+  $ownedPids = @($listenerPids | Where-Object { TestFrontendProcessIdentity $_ $PageBody })
+  if ($ownedPids.Count -ne $listenerPids.Count) {
+    $pids = $listenerPids -join ', '
+    throw "Port 5173 is occupied by another service (PID: $pids). It will not be terminated automatically."
+  }
+
+  foreach ($processId in $ownedPids) {
+    Stop-Process -Id $processId -Force -ErrorAction Stop
+  }
+  for ($attempt = 0; $attempt -lt 20; $attempt++) {
+    if (@(GetTcpListeners 5173).Count -eq 0) {
+      Say "Closed this project's previous Vite server; a fresh server will be started."
+      return
+    }
+    Start-Sleep -Milliseconds 100
+  }
+  throw 'The previous Vite server did not release port 5173 in time.'
 }
 
 function EnsureNodeReady() {
@@ -206,14 +250,10 @@ function EnsurePythonReady() {
 }
 
 function EnsurePortsReady() {
-  $frontListeners = GetTcpListeners 5173
+  $frontListeners = @(GetTcpListeners 5173)
   if ($frontListeners.Count -gt 0) {
     $body = GetText 'http://127.0.0.1:5173/'
-    if ($body -notlike '*/src/main.tsx*' -or $body -notlike '*multi-agent-tool*') {
-      $pids = ($frontListeners | Select-Object -ExpandProperty OwningProcess -Unique) -join ', '
-      throw "Port 5173 is occupied by another service (PID: $pids). Close it and start again."
-    }
-    Say "Port 5173 already has this app's Vite server; it will be reused."
+    StopFrontendListeners $frontListeners $body
   }
 
   $backendListeners = GetTcpListeners 18081
