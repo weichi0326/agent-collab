@@ -30,6 +30,7 @@ import {
   type AgentOutputFormat,
 } from '../stores/canvasStore';
 import { useAgentStore } from '../stores/agentStore';
+import { findProfessionalAgent } from '../features/professionalPackages/agentRegistry';
 import { useToolTags } from '../stores/toolStore';
 import { useModelOptions } from '../stores/modelStore';
 import { packModelRef, unpackModelRef, isValidModelRef } from '../lib/modelRef';
@@ -126,6 +127,12 @@ function PropertiesPanel() {
   const def = useAgentStore((s) =>
     agentId ? s.agents.find((a) => a.id === agentId) : undefined,
   );
+  const professionalAgentId = typeof node?.data?.professionalAgentId === 'string'
+    ? node.data.professionalAgentId
+    : undefined;
+  const professionalDef = professionalAgentId
+    ? findProfessionalAgent(professionalAgentId)
+    : undefined;
 
   const modelOptions = useModelOptions();
   const toolTags = useToolTags();
@@ -185,11 +192,13 @@ function PropertiesPanel() {
     ? useCanvasStore.getState().runHistory.find((record) => record.id === canvas.runId)
     : undefined;
 
-  const sourceMode: 'file' | 'url' | 'history' =
-    d.dataSourceMode === 'url' || d.dataSourceMode === 'history'
+  const sourceMode: 'file' | 'history' | 'inline' =
+    d.dataSourceMode === 'history'
+      || d.dataSourceMode === 'inline'
       ? d.dataSourceMode
       : 'file';
   const outputFormat: AgentOutputFormat =
+    d.outputFormat === 'txt' ||
     d.outputFormat === 'docx' ||
     d.outputFormat === 'xlsx' ||
     d.outputFormat === 'mindmap' ||
@@ -425,12 +434,20 @@ function PropertiesPanel() {
         onChange={(e) => patch({ dataSourceMode: e.target.value })}
         options={[
           { label: '文件', value: 'file' },
-          { label: '网页 URL（暂未支持）', value: 'url', disabled: true },
           { label: '历史产物', value: 'history' },
+          ...(sourceMode === 'inline'
+            ? [{ label: '任务快照', value: 'inline' }]
+            : []),
         ]}
         optionType="button"
       />
-      {sourceMode === 'file' ? (
+      {sourceMode === 'inline' ? (
+        <div className="node-source__inline">
+          <strong>{d.inlineDataSource?.name || '任务上下文快照'}</strong>
+          <pre>{d.inlineDataSource?.content || '快照内容为空'}</pre>
+          <div className="node-hint">这是创建专业任务时固定的上下文；可切换到其他来源，但不能直接改写快照。</div>
+        </div>
+      ) : sourceMode === 'file' ? (
         <div className="node-source__files">
           {!inTauri && (
             <input
@@ -478,14 +495,6 @@ function PropertiesPanel() {
                 : `已选 ${files.length} 个文件，文件内容读取待桌面端接入`
               : '未选择任何文件'}
           </div>
-        </div>
-      ) : sourceMode === 'url' ? (
-        <div className="node-source__url">
-          <Input
-            disabled
-            value={typeof d.dataSourceUrl === 'string' ? d.dataSourceUrl : ''}
-          />
-          <div className="node-hint">网页 URL 暂未支持，请改用文件或历史产物</div>
         </div>
       ) : (
         <div className="node-source__files">
@@ -739,6 +748,13 @@ function PropertiesPanel() {
             )}
             {def && (
               <div className="agent-form__origin">源自 Agent 库：{def.name}</div>
+            )}
+            {professionalAgentId && (
+              <div className="agent-form__origin">
+                {professionalDef
+                  ? `源自${professionalDef.packageName}专业包：${professionalDef.name}`
+                  : '来源专业包当前未安装；节点保留安装时的配置快照'}
+              </div>
             )}
             <NodeRunStatus
               runState={d.runState}

@@ -18,6 +18,8 @@ describe('uiStore drawer display mode', () => {
       drawerExpanded: false,
       drawerFullscreen: false,
       view: 'workspace',
+      workspaceReturn: null,
+      fictionistEntrySection: null,
       settingsSection: 'models',
       settingsDirty: false,
     });
@@ -63,6 +65,21 @@ describe('uiStore drawer display mode', () => {
     expect(persisted).not.toHaveProperty('view');
     expect(persisted).not.toHaveProperty('settingsSection');
     expect(persisted).not.toHaveProperty('settingsDirty');
+  });
+
+  it('keeps workflow canvas return context transient', () => {
+    useUiStore.getState().setWorkspaceReturn({
+      target: 'fictionist-workflows',
+      canvasId: 'canvas-workflow-1',
+    });
+    useUiStore.getState().setFictionistEntrySection('workflows');
+
+    expect(useUiStore.getState().workspaceReturn?.canvasId).toBe('canvas-workflow-1');
+    expect(useUiStore.getState().fictionistEntrySection).toBe('workflows');
+
+    const persisted = partializeUiState(useUiStore.getState());
+    expect(persisted).not.toHaveProperty('workspaceReturn');
+    expect(persisted).not.toHaveProperty('fictionistEntrySection');
   });
 });
 

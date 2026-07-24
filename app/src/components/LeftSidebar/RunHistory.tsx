@@ -6,6 +6,7 @@ import {
 } from '@ant-design/icons';
 import { canvasLimitMessage, useCanvasStore } from '../../stores/canvasStore';
 import { RUN_HISTORY_STATUS } from './constants';
+import { runHistoryDisplayName } from './runHistoryDisplay';
 
 export function RunHistory() {
   const { message } = App.useApp();
@@ -67,7 +68,7 @@ export function RunHistory() {
               )}
               <div className="history-item__text">
                 <div className="history-item__canvas">
-                  {r.canvasName}_{r.stamp}
+                  {runHistoryDisplayName(r)}
                 </div>
                 <div className="history-item__time">{r.time}</div>
               </div>

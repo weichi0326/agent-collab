@@ -8,6 +8,12 @@ import type { SettingsSection } from '../settings/settingsCatalog';
 export type MasterModel = ModelRef;
 
 export type AppView = 'workspace' | 'fictionist' | 'reports' | 'settings';
+export type FictionistEntrySection = 'library' | 'workflows';
+
+export interface WorkspaceReturnContext {
+  target: 'fictionist-workflows';
+  canvasId: string;
+}
 
 interface UiState {
   leftWidth: number;
@@ -19,6 +25,8 @@ interface UiState {
   drawerExpanded: boolean;
   drawerFullscreen: boolean;
   view: AppView;
+  workspaceReturn: WorkspaceReturnContext | null;
+  fictionistEntrySection: FictionistEntrySection | null;
   settingsSection: SettingsSection;
   settingsDirty: boolean;
   jiziPlacement: 'top' | 'side';
@@ -31,6 +39,8 @@ interface UiState {
   setDrawerExpanded: (v: boolean | ((prev: boolean) => boolean)) => void;
   setDrawerFullscreen: (value: boolean) => void;
   setView: (v: AppView) => void;
+  setWorkspaceReturn: (context: WorkspaceReturnContext | null) => void;
+  setFictionistEntrySection: (section: FictionistEntrySection | null) => void;
   setSettingsSection: (section: SettingsSection) => void;
   setSettingsDirty: (dirty: boolean) => void;
   setJiziPlacement: (p: 'top' | 'side') => void;
@@ -70,6 +80,8 @@ export const useUiStore = create<UiState>()(
       drawerExpanded: false,
       drawerFullscreen: false,
       view: 'workspace',
+      workspaceReturn: null,
+      fictionistEntrySection: null,
       settingsSection: 'models',
       settingsDirty: false,
       jiziPlacement: 'top',
@@ -86,6 +98,8 @@ export const useUiStore = create<UiState>()(
         })),
       setDrawerFullscreen: (drawerFullscreen) => set({ drawerFullscreen }),
       setView: (v) => set({ view: v }),
+      setWorkspaceReturn: (workspaceReturn) => set({ workspaceReturn }),
+      setFictionistEntrySection: (fictionistEntrySection) => set({ fictionistEntrySection }),
       setSettingsSection: (settingsSection) => set({ settingsSection }),
       setSettingsDirty: (settingsDirty) => set({ settingsDirty }),
       setJiziPlacement: (jiziPlacement) => set({ jiziPlacement }),

@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import TitleBar from './components/TitleBar';
 import LeftSidebar from './components/LeftSidebar';
 import CanvasTabs from './components/CanvasTabs';
+import ProfessionalTaskBar from './components/ProfessionalTaskBar/ProfessionalTaskBar';
 import CanvasArea from './components/CanvasArea';
 import CanvasStatusBar from './components/CanvasStatusBar';
 import PropertiesPanel from './components/PropertiesPanel';
@@ -29,6 +30,8 @@ import { useOrchestratorStore } from './stores/orchestratorStore';
 import { useJiziSkillSettingsStore } from './stores/jiziSkillStore';
 import { useOnboardingStore } from './onboarding/onboardingStore';
 import { useFictionistStore } from './features/fictionist/fictionistStore';
+import { useProfessionalTaskStore } from './features/professionalTasks/professionalTaskStore';
+import { useWorkflowPolicyStore } from './features/professionalTasks/workflowPolicyStore';
 import { requestAppView } from './settings/appNavigation';
 import { appViewLabel, workspaceLayerState } from './settings/appView';
 import './App.css';
@@ -55,6 +58,8 @@ const PERSISTED = [
   useOrchestratorStore,
   useJiziSkillSettingsStore,
   useOnboardingStore,
+  useProfessionalTaskStore,
+  useWorkflowPolicyStore,
 ];
 
 const HYDRATION_TIMEOUT_MS = 8000;
@@ -105,6 +110,7 @@ function App() {
   const { hydrated, timedOut, forceReady } = useAllHydrated();
   const [startupReady, setStartupReady] = useState(false);
   const view = useUiStore((s) => s.view);
+  const fictionistEntrySection = useUiStore((s) => s.fictionistEntrySection);
   const jiziPlacement = useUiStore((s) => s.jiziPlacement);
   const onboardingActive = useOnboardingStore((s) => s.status === 'active');
   const { node: selectedNode } = useSelectedNodeContext();
@@ -118,12 +124,16 @@ function App() {
     let cancelled = false;
     const start = async () => {
       const count = recoverInterruptedRuns();
+      const professionalTaskCount = useProfessionalTaskStore.getState().recoverInterrupted();
       ensureCanvas();
       await useFictionistStore.getState().hydrate();
       if (cancelled) return;
       setStartupReady(true);
       if (count > 0) {
         message.warning(`已恢复 ${count} 个异常中断的运行任务`);
+      }
+      if (professionalTaskCount > 0) {
+        message.warning(`${professionalTaskCount} 个专业任务上次未完成，可以重新运行对应画布`);
       }
     };
     void start();
@@ -221,6 +231,7 @@ function App() {
             <LeftSidebar />
             <div className="canvas-column">
               <CanvasTabs />
+              <ProfessionalTaskBar />
               <CanvasArea />
               <CanvasStatusBar />
             </div>
@@ -248,7 +259,7 @@ function App() {
       {view === 'fictionist' && (
         <div className="app-view-stage pearl-page-enter">
           <Suspense fallback={<Spin description="加载小说家工作区…" />}>
-            <FictionistWorkspace />
+            <FictionistWorkspace initialSection={fictionistEntrySection ?? undefined} />
           </Suspense>
         </div>
       )}

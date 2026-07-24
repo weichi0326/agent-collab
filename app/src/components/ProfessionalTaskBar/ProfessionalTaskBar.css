@@ -1,0 +1,53 @@
+.professional-task-bar {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #dce4e0;
+  background: #f4f8f6;
+  color: #273b34;
+}
+
+.professional-task-bar__source,
+.professional-task-bar__actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.professional-task-bar__source > span {
+  color: #5b6c66;
+  font-size: 12px;
+}
+
+.professional-task-bar__source > strong {
+  font-size: 13px;
+}
+
+.professional-task-bar__source > small {
+  max-width: 280px;
+  overflow: hidden;
+  color: #9a532b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.professional-task-context {
+  max-height: 58vh;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid #dce4e0;
+  border-radius: 6px;
+  background: #f8faf9;
+  color: #24332e;
+  font-family: "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -30,7 +30,6 @@ import {
 } from '../stores/canvasStore';
 import { useAgentStore } from '../stores/agentStore';
 import { uid } from '../lib/id';
-import { normalizeToolTags } from '../lib/toolTagMigration';
 import { formatTimerLabel } from '../lib/timerLabel';
 import {
   DEFAULT_ZOOM,
@@ -56,6 +55,7 @@ import {
   snapNodeChangesToAlignment,
   type AlignmentGuide,
 } from '../lib/alignmentSnap';
+import { buildAgentNodeFromDrop } from './CanvasArea/agentDrop';
 
 const nodeTypes = { agent: AgentNode, gate: GateNode, timer: TimerNode };
 const edgeTypes = { orthogonal: EditableOrthogonalEdge };
@@ -265,39 +265,36 @@ function Flow() {
 
       const raw = event.dataTransfer.getData('application/agent');
       if (!raw) return;
-      let agent: { agentId?: string; name: string };
-      try {
-        agent = JSON.parse(raw) as { agentId?: string; name: string };
-      } catch {
-        return;
-      }
-      if (!agent.name) return;
       const position = screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       });
       // 快照复制:落点时从定义拷贝各字段进节点 data,之后与定义解耦
-      const def = agent.agentId
-        ? useAgentStore.getState().agents.find((a) => a.id === agent.agentId)
-        : undefined;
-      const node: Node = {
-        id: uid('node'),
-        type: 'agent',
+      const node = buildAgentNodeFromDrop(
+        raw,
         position,
-        data: {
-          agentId: agent.agentId,
-          label: def?.name ?? agent.name,
-          description: def?.description ?? '',
-          systemPrompt: def?.systemPrompt ?? '',
-          toolTags: normalizeToolTags(def?.toolTags),
-          modelRef: def?.modelRef ?? null,
-          inputSchemaText: def?.inputSchemaText ?? '',
-          outputSchemaText: def?.outputSchemaText ?? '',
-        },
-      };
+        useAgentStore.getState().agents,
+      );
+      if (!node) return;
       addNode(activeId, node);
     },
     [screenToFlowPosition, addNode, activeId],
+  );
+
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      const currentCanvas = useCanvasStore
+        .getState()
+        .canvases.find((current) => current.id === activeId);
+      if (!currentCanvas?.readOnly) return;
+      const changes: NodeChange[] = currentCanvas.nodes.map((current) => ({
+        id: current.id,
+        type: 'select',
+        selected: current.id === node.id,
+      }));
+      applyNodes(activeId, changes);
+    },
+    [activeId, applyNodes],
   );
 
   const collapsibleNodes =
@@ -337,6 +334,7 @@ function Flow() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeClick={onNodeClick}
         connectionMode={ConnectionMode.Loose}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
@@ -422,17 +420,47 @@ function CanvasArea() {
     s.canvases.some((c) => c.id === s.activeId),
   );
   const addCanvas = useCanvasStore((s) => s.addCanvas);
+  const addNode = useCanvasStore((s) => s.addNode);
   const maxCanvases = useCanvasStore((s) => s.maxCanvases);
+
+  const onEmptyDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const raw = event.dataTransfer.getData('application/agent');
+    if (!raw) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const node = buildAgentNodeFromDrop(
+      raw,
+      {
+        x: Math.max(40, event.clientX - bounds.left - 100),
+        y: Math.max(40, event.clientY - bounds.top - 30),
+      },
+      useAgentStore.getState().agents,
+    );
+    if (!node) return;
+    const canvasId = addCanvas();
+    if (!canvasId) {
+      message.warning(canvasLimitMessage(maxCanvases));
+      return;
+    }
+    addNode(canvasId, node);
+    message.success(`已创建画布并加入「${String(node.data.label ?? 'Agent')}」`);
+  }, [addCanvas, addNode, maxCanvases, message]);
 
   if (!hasActive) {
     return (
       <div
         className="canvas-area canvas-area--empty"
         data-onboarding="canvas-surface"
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={onEmptyDrop}
       >
         <div className="canvas-empty">
           <PartitionOutlined className="canvas-empty__icon" />
           <div className="canvas-empty__text">当前没有打开的画布</div>
+          <div className="canvas-empty__hint">可将 Agent 拖到这里自动创建画布</div>
           <Button
             type="primary"
             icon={<PlusOutlined />}

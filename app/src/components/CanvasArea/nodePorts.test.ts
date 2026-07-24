@@ -33,4 +33,10 @@ describe('node port interaction', () => {
     expect(styles).toContain('.timer-node--selected .agent-node__handle');
     expect(styles).toMatch(/opacity:\s*1;[^}]*pointer-events:\s*all;/s);
   });
+
+  it('keeps node inspection clickable on read-only canvases', () => {
+    expect(canvasSource).toContain('const onNodeClick = useCallback');
+    expect(canvasSource).toContain('if (!currentCanvas?.readOnly) return;');
+    expect(canvasSource).toContain('onNodeClick={onNodeClick}');
+  });
 });

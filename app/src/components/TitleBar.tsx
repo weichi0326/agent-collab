@@ -19,7 +19,6 @@ import {
 import ServiceStatusDot from './ServiceStatusDot';
 import {
   removeRunArtifacts,
-  runCanvas,
   RunAbortedError,
 } from '../lib/agentRunner';
 import { listTools, restartPythonService } from '../lib/pythonClient';
@@ -28,6 +27,7 @@ import {
   registerRunController,
   unregisterRunController,
 } from '../lib/runControllers';
+import { runCanvasWithSystemFallback } from '../features/professionalTasks/systemWorkflowExecution';
 import { useAbortedRunStore } from '../stores/abortedRunStore';
 import { useUiStore, type AppView } from '../stores/uiStore';
 import { appViewLabel } from '../settings/appView';
@@ -49,6 +49,8 @@ interface PrimaryViewActionsProps {
   onSettings: () => void;
   onRefreshReports: () => void;
   onOpenOutput: () => void;
+  onWorkflowCenter?: () => void;
+  showWorkflowReturn?: boolean;
   settingsButtonRef?: Ref<HTMLAnchorElement | HTMLButtonElement>;
 }
 
@@ -103,6 +105,8 @@ export function PrimaryViewActions({
   onSettings,
   onRefreshReports,
   onOpenOutput,
+  onWorkflowCenter,
+  showWorkflowReturn = false,
   settingsButtonRef,
 }: PrimaryViewActionsProps) {
   if (view === 'reports') {
@@ -134,6 +138,11 @@ export function PrimaryViewActions({
   return (
     <nav className="title-bar__view-nav" aria-label="一级页面">
       <Space>
+        {showWorkflowReturn && onWorkflowCenter && (
+          <Button size="small" icon={<ArrowLeftOutlined />} onClick={onWorkflowCenter}>
+            返回工作流中心
+          </Button>
+        )}
         <Button size="small" icon={<BarChartOutlined />} onClick={onReports}>
           报告中心
         </Button>
@@ -171,6 +180,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
   // 已保存但有改动时,运行前弹「另存为新名 / 覆盖保存」选择框
   const [dirtyRunOpen, setDirtyRunOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
   const [restartingBackend, setRestartingBackend] = useState(false);
   // 中止残留产物清理走共享 store:整图运行与姬子子图重跑中止都汇入同一「任务已中止」Modal。
   const abortedRun = useAbortedRunStore((s) => s.abortedRun);
@@ -180,6 +190,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
   const abortRef = useRef<AbortController | null>(null);
   const settingsDirty = useUiStore((state) => state.settingsDirty);
   const setSettingsDirty = useUiStore((state) => state.setSettingsDirty);
+  const workspaceReturn = useUiStore((state) => state.workspaceReturn);
 
   const restartOnboarding = () => {
     const onboarding = useOnboardingStore.getState();
@@ -202,6 +213,9 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
   }, [view]);
 
   const readOnly = !!activeCanvas?.readOnly;
+  const systemTemplate = Boolean(
+    activeCanvas?.workflowRef?.systemWorkflow && !activeCanvas.origin,
+  );
   const onRestartBackend = async () => {
     // 运行中时按钮已 disabled,这里无需再拦截(2.8)
     setRestartingBackend(true);
@@ -234,24 +248,34 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
     }
   };
 
-  const doRun = async () => {
-    if (running) return;
+  const doRun = async (sourceCanvasId = activeId) => {
+    if (runningRef.current) return;
+    runningRef.current = true;
     const controller = new AbortController();
     abortRef.current = controller;
     // 按源画布 id 登记本次运行的中止控制器,供编排层「忽略失败」时停止画布(item 2)。
-    const runCanvasId = activeId;
-    registerRunController(runCanvasId, controller);
+    let registeredCanvasId = sourceCanvasId;
+    registerRunController(registeredCanvasId, controller);
     setRunning(true);
     try {
-      const result = await runCanvas(activeId, controller.signal);
+      const result = await runCanvasWithSystemFallback(sourceCanvasId, controller.signal, {
+        onFallback: ({ fallbackCanvasId }) => {
+          unregisterRunController(registeredCanvasId, controller);
+          registeredCanvasId = fallbackCanvasId;
+          registerRunController(registeredCanvasId, controller);
+          message.warning('主流程运行失败，正在按设置运行备用流程；本次会额外执行一次');
+        },
+      });
       message.success(
-        `运行完成：${result.nodeCount} 个节点，写出 ${result.writtenCount} 个文件`,
+        result.usedFallback
+          ? `主流程失败，备用流程已完成；本次额外执行一次，写出 ${result.writtenCount} 个文件`
+          : `运行完成：${result.nodeCount} 个节点，写出 ${result.writtenCount} 个文件`,
       );
     } catch (err) {
       if (err instanceof RunAbortedError) {
         if (err.artifacts.length > 0) {
           setAbortedRun({
-            canvasId: err.canvasId ?? activeId,
+            canvasId: err.canvasId ?? registeredCanvasId,
             artifacts: err.artifacts,
             runId: err.runId,
           });
@@ -263,8 +287,9 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
       const detail = err instanceof Error ? err.message : '未知错误';
       message.error(`运行失败：${detail}`);
     } finally {
-      unregisterRunController(runCanvasId, controller);
+      unregisterRunController(registeredCanvasId, controller);
       abortRef.current = null;
+      runningRef.current = false;
       setRunning(false);
     }
   };
@@ -298,6 +323,10 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
       message.warning('当前没有打开的画布');
       return;
     }
+    if (systemTemplate) {
+      message.info('专业包内置工作流画布不能另存为普通画布');
+      return;
+    }
     setNameValue('');
     setNamingMode('saveAs');
     setPendingRun(false);
@@ -317,7 +346,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
     message.success('画布已保存');
     if (pendingRun) {
       setPendingRun(false);
-      void doRun();
+      void doRun(activeId);
     }
   };
 
@@ -342,18 +371,18 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
       message.warning('画布为空,请先添加节点后再运行');
       return;
     }
-    if (!activeCanvas.savedId) {
+    if (!activeCanvas.savedId && !activeCanvas.origin) {
       setNameValue('');
       setNamingMode('first');
       setPendingRun(true);
       setNaming(true);
       return;
     }
-    if (isCanvasDirty(activeCanvas, savedCanvases)) {
+    if (activeCanvas.savedId && isCanvasDirty(activeCanvas, savedCanvases)) {
       setDirtyRunOpen(true);
       return;
     }
-    void doRun();
+    void doRun(activeCanvas.id);
   };
 
   // 已保存但有改动:覆盖保存后运行
@@ -361,7 +390,7 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
     setDirtyRunOpen(false);
     saveActive();
     message.success('画布已更新');
-    void doRun();
+    void doRun(activeId);
   };
 
   // 已保存但有改动:另存为新名(走命名框,完成后运行)
@@ -400,6 +429,8 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
   // 命令面板(Ctrl+K)通过 window 事件转发运行/保存,复用此处的完整流程。
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
+  const doRunRef = useRef(doRun);
+  doRunRef.current = doRun;
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
   useEffect(() => {
@@ -407,6 +438,9 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
       const type = (e as CustomEvent).detail;
       if (type === 'run') onRunRef.current();
       else if (type === 'save') onSaveRef.current();
+      else if (type?.type === 'run-canvas' && typeof type.canvasId === 'string') {
+        void doRunRef.current(type.canvasId);
+      }
     };
     window.addEventListener('agent-titlebar-command', handler);
     return () => window.removeEventListener('agent-titlebar-command', handler);
@@ -432,6 +466,12 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
   const openSettings = () => {
     setSettingsDirty(false);
     setView('settings');
+  };
+
+  const openWorkflowCenter = () => {
+    useUiStore.getState().setWorkspaceReturn(null);
+    useUiStore.getState().setFictionistEntrySection('workflows');
+    setView('fictionist');
   };
 
   return (
@@ -465,6 +505,9 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
             onSettings={openSettings}
             onRefreshReports={onRefreshReports}
             onOpenOutput={() => void onOpenOutputDir()}
+            onWorkflowCenter={openWorkflowCenter}
+            showWorkflowReturn={workspaceReturn?.target === 'fictionist-workflows'
+              && workspaceReturn.canvasId === activeId}
             settingsButtonRef={settingsButtonRef}
         />
         <Button
@@ -495,8 +538,8 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
         <Button
           className="title-bar__save-as"
           size="small"
-          disabled={readOnly || running}
-          title={readOnly ? '只读快照不可另存' : '另存为一个新画布'}
+          disabled={readOnly || systemTemplate || running}
+          title={readOnly ? '只读快照不可另存' : systemTemplate ? '专业包内置工作流不可另存为普通画布' : '另存为一个新画布'}
           onClick={onSaveAs}
         >
           另存为
@@ -509,8 +552,8 @@ function TitleBar({ view, setView, onRefreshReports }: TitleBarProps) {
           type="primary"
           danger={running}
           icon={running ? <StopOutlined /> : <PlayCircleOutlined />}
-          disabled={readOnly && !running}
-          title={readOnly ? '只读快照不可运行' : undefined}
+          disabled={(readOnly || systemTemplate) && !running}
+          title={readOnly ? '只读画布不可运行' : systemTemplate ? '请从小说家正文页发起任务' : undefined}
           onClick={onRun}
         >
           {running ? '中止任务' : '运行'}

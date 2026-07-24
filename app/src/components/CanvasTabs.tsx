@@ -1,17 +1,27 @@
 import { useState } from 'react';
 import { Tabs, Input, App, Modal, Button } from 'antd';
 import {
+  BookOutlined,
   CheckCircleFilled,
   CloseCircleFilled,
+  DownOutlined,
   EyeOutlined,
+  LockOutlined,
   LoadingOutlined,
   PauseCircleFilled,
+  RightOutlined,
 } from '@ant-design/icons';
+import {
+  FICTIONIST_TABS_DEFAULT_EXPANDED,
+  fictionistCanvasDisplayName,
+  partitionCanvasTabs,
+} from './canvasTabGroups';
 import {
   useCanvasStore,
   canvasLimitMessage,
   isCanvasDirty,
   validateCanvasName,
+  type Canvas,
   type CanvasRunStatus,
 } from '../stores/canvasStore';
 
@@ -21,6 +31,36 @@ function RunTabIcon({ status }: { status?: CanvasRunStatus }) {
   if (status === 'failed') return <CloseCircleFilled />;
   if (status === 'cancelled') return <PauseCircleFilled />;
   return <EyeOutlined />;
+}
+
+function canvasTabItem(canvas: Canvas) {
+  const displayName = fictionistCanvasDisplayName(canvas);
+  return {
+    key: canvas.id,
+    // 运行中的画布隐藏关闭按钮，避免误关正在执行的任务。
+    closable: !(canvas.lockClose || canvas.runState?.status === 'running'),
+    label: canvas.readOnly && canvas.workflowRef?.systemWorkflow ? (
+      <span
+        className="canvas-tab-label canvas-tab--readonly"
+        title="系统备用画布，只能查看，任务失败时由小说家自动引用"
+      >
+        <LockOutlined />
+        <span className="canvas-tab-label__text">{displayName}</span>
+      </span>
+    ) : canvas.readOnly ? (
+      <span
+        className={`canvas-tab-label canvas-tab--readonly canvas-tab--${canvas.runState?.status ?? 'idle'}`}
+        title="只读运行快照，不会影响原画布"
+      >
+        <RunTabIcon status={canvas.runState?.status} />
+        <span className="canvas-tab-label__text">{displayName}</span>
+      </span>
+    ) : (
+      <span className="canvas-tab-label">
+        <span className="canvas-tab-label__text">{displayName}</span>
+      </span>
+    ),
+  };
 }
 
 function CanvasTabs() {
@@ -36,6 +76,9 @@ function CanvasTabs() {
 
   const [closeNamingId, setCloseNamingId] = useState<string | null>(null);
   const [closeNameValue, setCloseNameValue] = useState('');
+  const [fictionistExpanded, setFictionistExpanded] = useState(
+    FICTIONIST_TABS_DEFAULT_EXPANDED,
+  );
 
   const onEdit = (
     targetKey: React.MouseEvent | React.KeyboardEvent | string,
@@ -93,25 +136,10 @@ function CanvasTabs() {
     }
   };
 
-  const items = canvases.map((c) => ({
-    key: c.id,
-    // 4.8：运行中的画布隐藏关闭按钮(closable:false),避免误关正在跑的任务;结束后恢复可关闭
-    closable: !(c.lockClose || c.runState?.status === 'running'),
-    label: c.readOnly ? (
-      // 只读快照 tab:眼睛图标标识,不可重命名
-      <span
-        className={`canvas-tab-label canvas-tab--readonly canvas-tab--${c.runState?.status ?? 'idle'}`}
-        title="只读运行快照，不会影响原画布"
-      >
-        <RunTabIcon status={c.runState?.status} />
-        <span className="canvas-tab-label__text">{c.name}</span>
-      </span>
-    ) : (
-      <span className="canvas-tab-label">
-        <span className="canvas-tab-label__text">{c.name}</span>
-      </span>
-    ),
-  }));
+  const { ordinary, fictionist: fictionistCanvases } = partitionCanvasTabs(canvases);
+  const ordinaryItems = ordinary.map(canvasTabItem);
+  const fictionistItems = fictionistCanvases.map(canvasTabItem);
+  const activeFictionistCanvas = fictionistCanvases.find((canvas) => canvas.id === activeId);
 
   const commitCloseNaming = () => {
     const id = closeNamingId;
@@ -131,14 +159,53 @@ function CanvasTabs() {
   return (
     <div className="canvas-tabs">
       <Tabs
+        className="canvas-tabs__ordinary"
         type="editable-card"
         size="small"
         animated={false}
         activeKey={activeId}
         onChange={setActive}
         onEdit={onEdit}
-        items={items}
+        items={ordinaryItems}
       />
+      {fictionistItems.length > 0 ? (
+        <section className={`canvas-package-tabs${activeFictionistCanvas ? ' is-active' : ''}`}>
+          <button
+            type="button"
+            className="canvas-package-tabs__toggle"
+            aria-expanded={fictionistExpanded}
+            aria-controls="fictionist-canvas-tabs"
+            aria-label={`${fictionistExpanded ? '收起' : '展开'}小说家画布（${fictionistItems.length}）`}
+            onClick={() => setFictionistExpanded((expanded) => !expanded)}
+          >
+            <span className="canvas-package-tabs__heading">
+              {fictionistExpanded ? <DownOutlined /> : <RightOutlined />}
+              <BookOutlined />
+              <strong>小说家画布</strong>
+              <em>{fictionistItems.length}</em>
+            </span>
+            {activeFictionistCanvas ? (
+              <span className="canvas-package-tabs__current">
+                当前：{fictionistCanvasDisplayName(activeFictionistCanvas)}
+              </span>
+            ) : null}
+          </button>
+          {fictionistExpanded ? (
+            <div className="canvas-package-tabs__content" id="fictionist-canvas-tabs">
+              <Tabs
+                type="editable-card"
+                size="small"
+                animated={false}
+                hideAdd
+                activeKey={activeId}
+                onChange={setActive}
+                onEdit={onEdit}
+                items={fictionistItems}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       <Modal
         title="保存并关闭画布"
         open={!!closeNamingId}

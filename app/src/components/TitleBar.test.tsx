@@ -44,6 +44,36 @@ describe('title bar primary view actions', () => {
     expect(html).not.toContain('aria-haspopup');
   });
 
+  it('shows the workflow center return action only when requested', () => {
+    const hidden = renderToStaticMarkup(
+      <PrimaryViewActions
+        view="workspace"
+        onWorkspace={noop}
+        onFictionist={noop}
+        onReports={noop}
+        onSettings={noop}
+        onRefreshReports={noop}
+        onOpenOutput={noop}
+      />,
+    );
+    const visible = renderToStaticMarkup(
+      <PrimaryViewActions
+        view="workspace"
+        onWorkspace={noop}
+        onFictionist={noop}
+        onReports={noop}
+        onSettings={noop}
+        onRefreshReports={noop}
+        onOpenOutput={noop}
+        onWorkflowCenter={noop}
+        showWorkflowReturn
+      />,
+    );
+
+    expect(hidden).not.toContain('返回工作流中心');
+    expect(visible).toContain('返回工作流中心');
+  });
+
   it('renders workspaces as top-level tabs', () => {
     const html = renderToStaticMarkup(
       <WorkspaceTabs view="fictionist" onWorkspace={noop} onFictionist={noop} />,

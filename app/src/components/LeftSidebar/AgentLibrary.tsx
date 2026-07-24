@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { App, Button, Dropdown, Input, Space, type MenuProps } from 'antd';
 import {
   CopyOutlined,
+  BookOutlined,
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
@@ -9,6 +10,7 @@ import {
   HolderOutlined,
   ImportOutlined,
   PlusOutlined,
+  RightOutlined,
   RobotOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
@@ -20,6 +22,19 @@ import { fileToText } from '../../lib/textFile';
 import { countAgentRefs } from './agentRefs';
 import { exportAgentToFile, parseAgentImport } from '../../lib/agentTransfer';
 import { useOnboardingStore } from '../../onboarding/onboardingStore';
+import { INSTALLED_PROFESSIONAL_AGENT_GROUPS } from '../../features/professionalPackages/agentRegistry';
+import type { ProfessionalAgentDefinition } from '../../features/professionalPackages/domain';
+
+function matchesAgentQuery(
+  agent: Pick<ProfessionalAgentDefinition, 'name' | 'description'>,
+  query: string,
+): boolean {
+  return !query
+    || agent.name.toLowerCase().includes(query)
+    || agent.description.toLowerCase().includes(query);
+}
+
+const MY_AGENTS_GROUP_ID = 'my-agents';
 
 export function AgentLibrary() {
   const { message, modal } = App.useApp();
@@ -34,17 +49,36 @@ export function AgentLibrary() {
 
   const [query, setQuery] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleGroup = (groupId: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return agents;
-    return agents.filter(
-      (a) =>
-        a.name.toLowerCase().includes(q) ||
-        a.description.toLowerCase().includes(q),
-    );
+    return agents.filter((agent) => matchesAgentQuery(agent, q));
   }, [agents, query]);
+  const professionalGroups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return INSTALLED_PROFESSIONAL_AGENT_GROUPS.map((group) => ({
+      ...group,
+      agents: group.agents.filter((agent) => matchesAgentQuery(agent, q)),
+    })).filter((group) => group.agents.length > 0);
+  }, [query]);
+  const hasAnyAgent = agents.length > 0
+    || INSTALLED_PROFESSIONAL_AGENT_GROUPS.some((group) => group.agents.length > 0);
+  const hasMatches = filtered.length > 0 || professionalGroups.length > 0;
+  const hasQuery = query.trim().length > 0;
+  const myAgentsCollapsed = !hasQuery && collapsedGroups.has(MY_AGENTS_GROUP_ID);
 
   const menuItems: MenuProps['items'] = PRESET_TEMPLATES.map((t) => ({
     key: t.key,
@@ -157,86 +191,159 @@ export function AgentLibrary() {
         />
       </div>
       <div className="panel-body">
-        {agents.length === 0 ? (
+        {!hasAnyAgent ? (
           <div className="panel-empty">暂无 Agent,点上方「新建 Agent」</div>
-        ) : filtered.length === 0 ? (
+        ) : !hasMatches ? (
           <div className="panel-empty">没有匹配的 Agent</div>
         ) : (
-          filtered.map((a) => (
-            <div
-              key={a.id}
-              data-agent-id={a.id}
-              data-onboarding={
-                a.id === tutorialAgentIds?.[0]
-                  ? 'tutorial-agent-first'
-                  : a.id === tutorialAgentIds?.[1]
-                    ? 'tutorial-agent-second'
-                    : undefined
-              }
-              className={`agent-card${draggingId === a.id ? ' agent-card--dragging' : ''}`}
-              draggable
-              onDragStart={(e) => {
-                setDraggingId(a.id);
-                e.dataTransfer.setData(
-                  'application/agent',
-                  JSON.stringify({ agentId: a.id, name: a.name }),
-                );
-                e.dataTransfer.setData('application/agent-sort', a.id);
-                e.dataTransfer.effectAllowed = 'move';
-              }}
-              onDragOver={(e) => {
-                if (!draggingId || draggingId === a.id) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-              }}
-              onDrop={(e) => {
-                const fromId = e.dataTransfer.getData('application/agent-sort');
-                if (!fromId || fromId === a.id) return;
-                e.preventDefault();
-                reorderAgent(fromId, a.id);
-                setDraggingId(null);
-              }}
-              onDragEnd={() => setDraggingId(null)}
-            >
-              <RobotOutlined className="agent-card__icon" />
-              <span className="agent-card__name">{a.name}</span>
-              <span className="agent-card__actions">
-                <EditOutlined
-                  className="agent-card__act"
-                  title="编辑"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openEdit(a.id);
-                  }}
-                />
-                <CopyOutlined
-                  className="agent-card__act"
-                  title="克隆"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClone(a.id);
-                  }}
-                />
-                <ExportOutlined
-                  className="agent-card__act"
-                  title="导出"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onExport(a.id);
-                  }}
-                />
-                <DeleteOutlined
-                  className="agent-card__act agent-card__act--danger"
-                  title="删除"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(a.id, a.name);
-                  }}
-                />
-              </span>
-              <HolderOutlined className="agent-card__grip" />
-            </div>
-          ))
+          <>
+            {professionalGroups.map((group) => {
+              const contentId = `agent-group-${group.packageId}`;
+              const collapsed = !hasQuery && collapsedGroups.has(group.packageId);
+              return (
+                <section className="agent-library-group" key={group.packageId}>
+                  <button
+                    type="button"
+                    className="agent-library-group__header"
+                    aria-controls={contentId}
+                    aria-expanded={!collapsed}
+                    title={collapsed ? '展开分组' : '收起分组'}
+                    onClick={() => toggleGroup(group.packageId)}
+                  >
+                    {collapsed ? <RightOutlined /> : <DownOutlined />}
+                    <BookOutlined />
+                    <strong>{group.packageName}专业包</strong>
+                    <span>{group.agents.length} 个节点</span>
+                  </button>
+                  {!collapsed && (
+                    <div id={contentId}>
+                      {group.agents.map((agent) => (
+                  <div
+                    key={agent.id}
+                    data-professional-agent-id={agent.id}
+                    className={`agent-card agent-card--professional${draggingId === agent.id ? ' agent-card--dragging' : ''}`}
+                    title={agent.description}
+                    draggable
+                    onDragStart={(event) => {
+                      setDraggingId(agent.id);
+                      event.dataTransfer.setData(
+                        'application/agent',
+                        JSON.stringify({ professionalAgentId: agent.id, name: agent.name }),
+                      );
+                      event.dataTransfer.effectAllowed = 'copyMove';
+                    }}
+                    onDragEnd={() => setDraggingId(null)}
+                  >
+                    <RobotOutlined className="agent-card__icon" />
+                    <span className="agent-card__copy">
+                      <span className="agent-card__name">{agent.name}</span>
+                      <small>{agent.description}</small>
+                    </span>
+                    <HolderOutlined className="agent-card__grip" />
+                  </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+            {filtered.length > 0 && (
+              <section className="agent-library-group">
+                <button
+                  type="button"
+                  className="agent-library-group__header"
+                  aria-controls={`agent-group-${MY_AGENTS_GROUP_ID}`}
+                  aria-expanded={!myAgentsCollapsed}
+                  title={myAgentsCollapsed ? '展开分组' : '收起分组'}
+                  onClick={() => toggleGroup(MY_AGENTS_GROUP_ID)}
+                >
+                  {myAgentsCollapsed ? <RightOutlined /> : <DownOutlined />}
+                  <RobotOutlined />
+                  <strong>我的 Agent</strong>
+                  <span>{filtered.length} 个</span>
+                </button>
+                {!myAgentsCollapsed && (
+                  <div id={`agent-group-${MY_AGENTS_GROUP_ID}`}>
+                    {filtered.map((a) => (
+                  <div
+                    key={a.id}
+                    data-agent-id={a.id}
+                    data-onboarding={
+                      a.id === tutorialAgentIds?.[0]
+                        ? 'tutorial-agent-first'
+                        : a.id === tutorialAgentIds?.[1]
+                          ? 'tutorial-agent-second'
+                          : undefined
+                    }
+                    className={`agent-card${draggingId === a.id ? ' agent-card--dragging' : ''}`}
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggingId(a.id);
+                      e.dataTransfer.setData(
+                        'application/agent',
+                        JSON.stringify({ agentId: a.id, name: a.name }),
+                      );
+                      e.dataTransfer.setData('application/agent-sort', a.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => {
+                      if (!draggingId || draggingId === a.id) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(e) => {
+                      const fromId = e.dataTransfer.getData('application/agent-sort');
+                      if (!fromId || fromId === a.id) return;
+                      e.preventDefault();
+                      reorderAgent(fromId, a.id);
+                      setDraggingId(null);
+                    }}
+                    onDragEnd={() => setDraggingId(null)}
+                  >
+                    <RobotOutlined className="agent-card__icon" />
+                    <span className="agent-card__name">{a.name}</span>
+                    <span className="agent-card__actions">
+                      <EditOutlined
+                        className="agent-card__act"
+                        title="编辑"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEdit(a.id);
+                        }}
+                      />
+                      <CopyOutlined
+                        className="agent-card__act"
+                        title="克隆"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClone(a.id);
+                        }}
+                      />
+                      <ExportOutlined
+                        className="agent-card__act"
+                        title="导出"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onExport(a.id);
+                        }}
+                      />
+                      <DeleteOutlined
+                        className="agent-card__act agent-card__act--danger"
+                        title="删除"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(a.id, a.name);
+                        }}
+                      />
+                    </span>
+                    <HolderOutlined className="agent-card__grip" />
+                  </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </>
         )}
       </div>
     </>

@@ -19,6 +19,7 @@ export const RUN_STATUS_COLOR = {
 } as const;
 
 export const OUTPUT_FORMAT_OPTIONS: { label: string; value: AgentOutputFormat }[] = [
+  { label: '纯文本（TXT）', value: 'txt' },
   { label: 'Markdown', value: 'markdown' },
   { label: 'Word', value: 'docx' },
   { label: 'Excel', value: 'xlsx' },
