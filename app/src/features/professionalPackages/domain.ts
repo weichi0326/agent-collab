@@ -18,6 +18,13 @@ export interface ProfessionalAgentDefinition {
   capabilities?: AgentNodeCapabilities;
   inputSchemaText?: string;
   outputSchemaText?: string;
+  usagePolicy?: ProfessionalAgentUsagePolicy;
+}
+
+export interface ProfessionalAgentUsagePolicy {
+  allowedTaskTypes: readonly string[];
+  allowedSystemWorkflowKeys: readonly string[];
+  reason: string;
 }
 
 export interface ProfessionalAgentGroup {

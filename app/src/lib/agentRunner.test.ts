@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import type { Canvas, AgentNodeData } from '../stores/canvasStore';
 import type { ProfessionalTaskOrigin } from '../features/professionalTasks/domain';
+import { FICTIONIST_AGENT_IDS } from '../features/fictionist/agents';
+import { CHAPTER_CONTEXT_RESULT_ROLE } from '../features/fictionist/chapterInsights';
 import type { CollectedInput, NodeOutput } from './agentRunner/types';
 
 const modelCalls: Array<{ nodeId: string; modelId?: string | null }> = [];
@@ -145,6 +147,21 @@ describe('agent runner integration', () => {
     });
 
     await expect(runCanvas('canvas-1')).rejects.toThrow('专业包内置工作流模板不能直接运行');
+    expect(useCanvasStore.getState().runHistory).toHaveLength(0);
+  });
+
+  it('rejects restricted chapter insight nodes before any model call', async () => {
+    setCanvas([
+      agentNode('context', {
+        professionalAgentId: FICTIONIST_AGENT_IDS.contextAnalyst,
+        professionalPackageId: 'fictionist',
+        resultRole: CHAPTER_CONTEXT_RESULT_ROLE,
+      }),
+    ]);
+
+    await expect(runCanvas('canvas-1')).rejects.toThrow('仅用于小说家的“AI 起草”和“续写下一章”画布');
+
+    expect(modelCalls).toHaveLength(0);
     expect(useCanvasStore.getState().runHistory).toHaveLength(0);
   });
 

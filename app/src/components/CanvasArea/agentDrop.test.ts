@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { FICTIONIST_AGENT_IDS } from '../../features/fictionist/agents';
-import { buildAgentNodeFromDrop } from './agentDrop';
+import {
+  agentNodeDropRestriction,
+  buildAgentNodeFromDrop,
+} from './agentDrop';
 
 describe('agent canvas drop', () => {
   it('builds a fictionist node snapshot from the professional drag payload', () => {
@@ -32,5 +35,26 @@ describe('agent canvas drop', () => {
       { x: 0, y: 0 },
       [],
     )).toBeNull();
+  });
+
+  it('blocks restricted insight nodes outside their writing canvases', () => {
+    const node = buildAgentNodeFromDrop(
+      JSON.stringify({
+        professionalAgentId: FICTIONIST_AGENT_IDS.contextAnalyst,
+        name: '上下文分析',
+      }),
+      { x: 0, y: 0 },
+      [],
+    );
+    if (!node) throw new Error('missing context analyst node');
+
+    expect(agentNodeDropRestriction(node, undefined, {})).toContain('AI 起草');
+    expect(agentNodeDropRestriction(node, {
+      workflowRef: {
+        packageId: 'fictionist',
+        workflowId: 'workflow-1',
+        systemWorkflow: { key: 'fictionist.chapter-draft', version: 1 },
+      },
+    }, {})).toBeUndefined();
   });
 });

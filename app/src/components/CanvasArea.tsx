@@ -43,6 +43,7 @@ import { SearchPanel } from './CanvasArea/SearchPanel';
 import { useCanvasSearch } from './CanvasArea/useCanvasSearch';
 import { useCanvasHotkeys } from './CanvasArea/useCanvasHotkeys';
 import { useUiStore } from '../stores/uiStore';
+import { useProfessionalTaskStore } from '../features/professionalTasks/professionalTaskStore';
 import { workspaceInteractionState } from '../settings/appView';
 import {
   routeEdgesForNodes,
@@ -55,7 +56,10 @@ import {
   snapNodeChangesToAlignment,
   type AlignmentGuide,
 } from '../lib/alignmentSnap';
-import { buildAgentNodeFromDrop } from './CanvasArea/agentDrop';
+import {
+  agentNodeDropRestriction,
+  buildAgentNodeFromDrop,
+} from './CanvasArea/agentDrop';
 
 const nodeTypes = { agent: AgentNode, gate: GateNode, timer: TimerNode };
 const edgeTypes = { orthogonal: EditableOrthogonalEdge };
@@ -276,9 +280,18 @@ function Flow() {
         useAgentStore.getState().agents,
       );
       if (!node) return;
+      const restriction = agentNodeDropRestriction(
+        node,
+        useCanvasStore.getState().canvases.find((current) => current.id === activeId),
+        useProfessionalTaskStore.getState().tasks,
+      );
+      if (restriction) {
+        message.warning(restriction);
+        return;
+      }
       addNode(activeId, node);
     },
-    [screenToFlowPosition, addNode, activeId],
+    [screenToFlowPosition, addNode, activeId, message],
   );
 
   const onNodeClick = useCallback(
@@ -437,6 +450,15 @@ function CanvasArea() {
       useAgentStore.getState().agents,
     );
     if (!node) return;
+    const restriction = agentNodeDropRestriction(
+      node,
+      undefined,
+      useProfessionalTaskStore.getState().tasks,
+    );
+    if (restriction) {
+      message.warning(restriction);
+      return;
+    }
     const canvasId = addCanvas();
     if (!canvasId) {
       message.warning(canvasLimitMessage(maxCanvases));

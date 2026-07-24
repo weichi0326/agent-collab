@@ -1850,6 +1850,36 @@
   line-height: 1.8;
 }
 
+.fictionist-pending-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+
+.fictionist-pending-insights > h3 {
+  margin: 0;
+  color: var(--fiction-ink);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.fictionist-pending-insights__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.fictionist-pending-insights__item {
+  min-width: 0;
+  max-height: 280px;
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid var(--fiction-line);
+  border-radius: 6px;
+  background: #f8faf9;
+}
+
 .fictionist-book-search .ant-drawer-body {
   display: flex;
   flex-direction: column;

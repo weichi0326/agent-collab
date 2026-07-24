@@ -24,6 +24,10 @@ import { exportAgentToFile, parseAgentImport } from '../../lib/agentTransfer';
 import { useOnboardingStore } from '../../onboarding/onboardingStore';
 import { INSTALLED_PROFESSIONAL_AGENT_GROUPS } from '../../features/professionalPackages/agentRegistry';
 import type { ProfessionalAgentDefinition } from '../../features/professionalPackages/domain';
+import { professionalAgentCanvasUsageDecision } from '../../features/professionalPackages/usagePolicy';
+import type { ProfessionalTask } from '../../features/professionalTasks/domain';
+import { useProfessionalTaskStore } from '../../features/professionalTasks/professionalTaskStore';
+import { useCanvasStore, type Canvas } from '../../stores/canvasStore';
 
 function matchesAgentQuery(
   agent: Pick<ProfessionalAgentDefinition, 'name' | 'description'>,
@@ -36,6 +40,20 @@ function matchesAgentQuery(
 
 const MY_AGENTS_GROUP_ID = 'my-agents';
 
+// oxlint-disable-next-line react/only-export-components
+export function professionalAgentCardState(
+  agent: ProfessionalAgentDefinition,
+  canvas: Pick<Canvas, 'origin' | 'workflowRef'> | undefined,
+  tasks: Record<string, ProfessionalTask>,
+) {
+  const usage = professionalAgentCanvasUsageDecision(agent, canvas, tasks);
+  return {
+    ...usage,
+    draggable: usage.allowed,
+    ariaDisabled: !usage.allowed,
+  };
+}
+
 export function AgentLibrary() {
   const { message, modal } = App.useApp();
   const agents = useAgentStore((s) => s.agents);
@@ -46,6 +64,9 @@ export function AgentLibrary() {
   const openNew = useAgentEditorStore((s) => s.openNew);
   const openEdit = useAgentEditorStore((s) => s.openEdit);
   const tutorialAgentIds = useOnboardingStore((s) => s.tutorialAgentIds);
+  const activeCanvas = useCanvasStore((state) =>
+    state.canvases.find((canvas) => canvas.id === state.activeId));
+  const professionalTasks = useProfessionalTaskStore((state) => state.tasks);
 
   const [query, setQuery] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -217,14 +238,25 @@ export function AgentLibrary() {
                   </button>
                   {!collapsed && (
                     <div id={contentId}>
-                      {group.agents.map((agent) => (
+                      {group.agents.map((agent) => {
+                        const usage = professionalAgentCardState(
+                          agent,
+                          activeCanvas,
+                          professionalTasks,
+                        );
+                        return (
                   <div
                     key={agent.id}
                     data-professional-agent-id={agent.id}
-                    className={`agent-card agent-card--professional${draggingId === agent.id ? ' agent-card--dragging' : ''}`}
-                    title={agent.description}
-                    draggable
+                    className={`agent-card agent-card--professional${usage.allowed ? '' : ' agent-card--disabled'}${draggingId === agent.id ? ' agent-card--dragging' : ''}`}
+                    title={usage.allowed ? agent.description : usage.reason}
+                    aria-disabled={!usage.allowed}
+                    draggable={usage.allowed}
                     onDragStart={(event) => {
+                      if (!usage.allowed) {
+                        event.preventDefault();
+                        return;
+                      }
                       setDraggingId(agent.id);
                       event.dataTransfer.setData(
                         'application/agent',
@@ -237,11 +269,12 @@ export function AgentLibrary() {
                     <RobotOutlined className="agent-card__icon" />
                     <span className="agent-card__copy">
                       <span className="agent-card__name">{agent.name}</span>
-                      <small>{agent.description}</small>
+                      <small>{usage.allowed ? agent.description : usage.reason}</small>
                     </span>
                     <HolderOutlined className="agent-card__grip" />
                   </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </section>

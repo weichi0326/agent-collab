@@ -395,6 +395,35 @@ export function InsightOutputPanel({
   );
 }
 
+export function PendingDraftInsights({ task }: { task?: ProfessionalTask }) {
+  if (!task) return null;
+  const contextOutput = task.outputs.find(
+    (output) => output.resultRole === CHAPTER_CONTEXT_RESULT_ROLE,
+  );
+  const canonCheckOutput = task.outputs.find(
+    (output) => output.resultRole === CHAPTER_CANON_CHECK_RESULT_ROLE,
+  );
+  if (!contextOutput && !canonCheckOutput) return null;
+
+  return (
+    <section className="fictionist-pending-insights" aria-label="本次任务分析">
+      <h3>本次任务分析</h3>
+      <div className="fictionist-pending-insights__grid">
+        {contextOutput ? (
+          <div className="fictionist-pending-insights__item">
+            <InsightOutputPanel kind="context" output={contextOutput} task={task} />
+          </div>
+        ) : null}
+        {canonCheckOutput ? (
+          <div className="fictionist-pending-insights__item">
+            <InsightOutputPanel kind="checks" output={canonCheckOutput} task={task} />
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function ContextInspector({
   mode,
   onModeChange,
@@ -4074,6 +4103,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
           下面是画布最终节点返回的草稿。你可以先修改标题和正文；只有点击“{reviewWritingMode === 'draft-current' ? '写入当前章节' : '保存为下一章'}”才会写入作品。
           {reviewWritingMode === 'draft-current' ? ' 若当前章节不再为空或修订号发生变化，系统会阻止覆盖。' : ' 原章节不会被覆盖。'}
         </p>
+        <PendingDraftInsights task={focusedTask} />
         <div className="fictionist-create-form fictionist-draft-review">
           <label>
             <span>章节名称</span>

@@ -32,6 +32,8 @@ import {
 } from './agentRunner/types';
 import { outputFormatForNode } from './agentRunner/outputFormats';
 import { useProfessionalTaskStore } from '../features/professionalTasks/professionalTaskStore';
+import { findProfessionalAgent } from '../features/professionalPackages/agentRegistry';
+import { professionalAgentCanvasUsageDecision } from '../features/professionalPackages/usagePolicy';
 import {
   incomingSources,
   outgoingTargets,
@@ -287,6 +289,21 @@ async function runCanvasInternal(
   }
   if (sourceCanvas.readOnly) throw new Error('只读运行画布不可再次运行。');
   if (sourceCanvas.nodes.length === 0) throw new Error('画布为空，请先添加节点。');
+  const professionalTasks = useProfessionalTaskStore.getState().tasks;
+  for (const node of sourceCanvas.nodes) {
+    const data = node.data as AgentNodeData;
+    if (!data.professionalAgentId) continue;
+    const definition = findProfessionalAgent(data.professionalAgentId);
+    if (!definition) continue;
+    const decision = professionalAgentCanvasUsageDecision(
+      definition,
+      sourceCanvas,
+      professionalTasks,
+    );
+    if (!decision.allowed) {
+      throw new Error(`节点“${data.label ?? definition.name}”${decision.reason}`);
+    }
+  }
   if (canvasState.canvases.length >= canvasState.maxCanvases) {
     throw new Error(`${canvasLimitMessage(canvasState.maxCanvases)}，无法创建运行副本。`);
   }

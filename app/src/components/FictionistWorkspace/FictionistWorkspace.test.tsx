@@ -10,6 +10,7 @@ import {
 import FictionistWorkspace, {
   FictionBookCover,
   InsightOutputPanel,
+  PendingDraftInsights,
 } from './FictionistWorkspace';
 import { buildFictionWorkflowEntries } from './workflowEntries';
 
@@ -159,6 +160,47 @@ describe('fictionist workspace mock', () => {
     expect(html).toContain('场景状态');
     expect(html).toContain('凌晨 02:46');
     expect(html).not.toContain('本章还没有上下文分析结果');
+  });
+
+  it('shows context and canon outputs beside a pending chapter draft', () => {
+    const task: ProfessionalTask = {
+      id: 'pending-writing-task',
+      packageId: 'fictionist',
+      taskType: 'continue-chapter',
+      taskLabel: '续写下一章',
+      sourceLabel: '《雾港来信》· 七号泊位',
+      status: 'review_required',
+      sourceRefs: [{ type: 'fiction-chapter', id: 'chapter-1', revision: 1 }],
+      contextSnapshot: { title: '章节上下文', format: 'markdown', content: '来源正文' },
+      expectedResult: { role: 'fictionist.chapter-draft', outputFormat: 'txt' },
+      packagePayload: {},
+      outputs: [
+        {
+          nodeId: 'context-node',
+          resultRole: CHAPTER_CONTEXT_RESULT_ROLE,
+          outputFormat: 'markdown',
+          label: '上下文分析',
+          content: '未回收线索：蓝墨水来信',
+        },
+        {
+          nodeId: 'check-node',
+          resultRole: CHAPTER_CANON_CHECK_RESULT_ROLE,
+          outputFormat: 'markdown',
+          label: '设定检查',
+          content: '未发现设定冲突',
+        },
+      ],
+      createdAt: '2026-07-25T00:00:00.000Z',
+      updatedAt: '2026-07-25T00:00:00.000Z',
+    };
+
+    const html = renderToStaticMarkup(<PendingDraftInsights task={task} />);
+
+    expect(html).toContain('本次任务分析');
+    expect(html).toContain('蓝墨水来信');
+    expect(html).toContain('未发现设定冲突');
+    expect(html).not.toContain(CHAPTER_CONTEXT_RESULT_ROLE);
+    expect(html).not.toContain(CHAPTER_CANON_CHECK_RESULT_ROLE);
   });
 
   it('explains when the writing workflow did not contain the selected insight node', () => {

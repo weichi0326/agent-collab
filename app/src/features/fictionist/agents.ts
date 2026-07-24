@@ -24,6 +24,15 @@ const common = {
   toolTags: ['file'],
 } as const;
 
+const chapterInsightUsagePolicy = {
+  allowedTaskTypes: ['draft-chapter', 'continue-chapter'],
+  allowedSystemWorkflowKeys: [
+    'fictionist.chapter-draft',
+    'fictionist.chapter-continue',
+  ],
+  reason: '仅用于小说家的“AI 起草”和“续写下一章”画布，需要明确的目标章节。',
+} as const;
+
 export const FICTIONIST_AGENTS: readonly ProfessionalAgentDefinition[] = [
   {
     ...common,
@@ -71,6 +80,7 @@ export const FICTIONIST_AGENTS: readonly ProfessionalAgentDefinition[] = [
       '你是一名小说章节上下文分析员。根据任务快照中的前文、正式设定、大纲和时间线，整理目标章节可直接使用的上下文。使用 Markdown，依次输出“出场人物”“场景状态”“未回收线索”“本章约束”四个小节；只写有输入依据的内容，缺失项明确写“暂无可靠信息”，不得虚构。',
     outputFormat: 'markdown',
     resultRole: CHAPTER_CONTEXT_RESULT_ROLE,
+    usagePolicy: chapterInsightUsagePolicy,
   },
   {
     ...common,
@@ -94,6 +104,7 @@ export const FICTIONIST_AGENTS: readonly ProfessionalAgentDefinition[] = [
       '你是一名小说连续性审校。逐项检查输入稿件的人物认知与动机、地点、时间顺序、物品状态、世界规则、专有名词和叙事视角。只报告有文本证据的问题，指出原句、冲突依据和最小修改建议，不虚构缺失设定。',
     outputFormat: 'markdown',
     resultRole: CHAPTER_CANON_CHECK_RESULT_ROLE,
+    usagePolicy: chapterInsightUsagePolicy,
     capabilities: {
       input: { enabled: true, contentMode: 'full', includeSupplementalSources: true },
     },

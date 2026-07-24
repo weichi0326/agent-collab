@@ -1458,6 +1458,19 @@
   border-style: dashed;
 }
 
+.agent-card--disabled,
+.agent-card--disabled:hover,
+.agent-card--disabled:active {
+  border-color: #e5e6eb;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.agent-card--disabled .agent-card__grip {
+  cursor: not-allowed;
+}
+
 .agent-card:active {
   cursor: grabbing;
 }
