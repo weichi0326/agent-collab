@@ -47,32 +47,8 @@
   gap: 10px;
 }
 
-.fictionist-project-switcher {
-  padding: 3px 7px 3px 3px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.fictionist-project-switcher:hover {
-  border-color: var(--fiction-line);
-  background: var(--fiction-soft);
-}
-
-.fictionist-project-switcher > .anticon:last-child {
-  margin-left: 2px;
-  color: var(--fiction-muted);
-  font-size: 10px;
-}
-
 .fictionist-project-identity > span:last-child,
 .fictionist-panel-title > span,
-.fictionist-context-row > span:last-child,
-.fictionist-check-summary > span,
-.fictionist-check-list button > span,
 .fictionist-workflow-list > div > span:nth-child(2) {
   min-width: 0;
   display: flex;
@@ -86,8 +62,6 @@
 
 .fictionist-project-identity small,
 .fictionist-panel-title small,
-.fictionist-context-row small,
-.fictionist-check-list small,
 .fictionist-workflow-list small {
   margin-top: 2px;
   color: var(--fiction-muted);
@@ -130,6 +104,25 @@
   margin-left: auto;
 }
 
+.fictionist-package-navigation {
+  margin-left: auto;
+  padding: 4px;
+  border: 1px solid var(--fiction-line);
+  border-radius: 999px;
+  background: #e9edeb;
+}
+
+.fictionist-package-navigation .ant-segmented-item {
+  min-width: 126px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fictionist-package-navigation .ant-segmented-item-selected {
+  color: #385f53;
+}
+
 .fictionist-layout {
   flex: 1;
   min-width: 0;
@@ -143,14 +136,20 @@
   grid-template-columns: 258px minmax(420px, 1fr);
 }
 
+.fictionist-layout--workflows {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .fictionist-layout--library .fictionist-navigator { grid-column: 1; }
 .fictionist-layout--library .fictionist-main { grid-column: 2; }
 
+.fictionist-layout--outline .fictionist-main,
 .fictionist-layout--canon .fictionist-main,
-.fictionist-layout--timeline .fictionist-main,
-.fictionist-layout--workflows .fictionist-main {
+.fictionist-layout--timeline .fictionist-main {
   grid-column: 3 / -1;
 }
+
+.fictionist-layout--workflows .fictionist-main { grid-column: 1; }
 
 .fictionist-rail,
 .fictionist-navigator,
@@ -237,41 +236,124 @@
   overflow-y: auto;
 }
 
+.fictionist-chapter-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fictionist-volume-group {
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--fiction-line);
+}
+
+.fictionist-volume-group:last-child { border-bottom: 0; }
+
 .fictionist-volume-label {
+  min-height: 38px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 8px 6px;
+  gap: 4px;
+  padding: 3px 2px;
   color: var(--fiction-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
-.fictionist-chapter-tree > button {
+.fictionist-volume-toggle {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 12px 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fiction-ink);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fictionist-volume-toggle:hover { background: var(--fiction-soft); }
+
+.fictionist-volume-toggle > span:not(.anticon) {
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fictionist-volume-toggle small {
+  color: var(--fiction-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.fictionist-volume-actions,
+.fictionist-chapter-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.fictionist-volume-actions .ant-btn,
+.fictionist-chapter-actions .ant-btn {
+  width: 25px;
+  min-width: 25px;
+  height: 25px;
+  padding: 0;
+}
+
+.fictionist-volume-actions { opacity: 0.58; }
+.fictionist-volume-label:hover .fictionist-volume-actions,
+.fictionist-volume-actions:focus-within { opacity: 1; }
+
+.fictionist-chapter-row {
   width: 100%;
   min-height: 54px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fiction-ink);
+}
+
+.fictionist-chapter-row:hover,
+.fictionist-simple-list button:hover {
+  background: var(--fiction-soft);
+}
+
+.fictionist-chapter-row.is-active {
+  border-color: rgba(99, 127, 145, 0.25);
+  background: rgba(99, 127, 145, 0.1);
+}
+
+.fictionist-chapter-open {
+  min-width: 0;
+  min-height: 52px;
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 8px;
   align-items: center;
   gap: 8px;
-  padding: 7px 9px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  padding: 7px 4px 7px 9px;
+  border: 0;
   background: transparent;
   color: var(--fiction-ink);
   text-align: left;
   cursor: pointer;
 }
 
-.fictionist-chapter-tree > button:hover,
-.fictionist-simple-list button:hover {
-  background: var(--fiction-soft);
-}
-
-.fictionist-chapter-tree > button.is-active {
-  border-color: rgba(99, 127, 145, 0.25);
-  background: rgba(99, 127, 145, 0.1);
-}
+.fictionist-chapter-actions { opacity: 0.48; }
+.fictionist-chapter-row:hover .fictionist-chapter-actions,
+.fictionist-chapter-row.is-active .fictionist-chapter-actions,
+.fictionist-chapter-actions:focus-within { opacity: 1; }
 
 .fictionist-chapter-index {
   color: #8a9390;
@@ -309,6 +391,13 @@
 .fictionist-status-dot.is-editing { background: var(--fiction-gold); }
 .fictionist-status-dot.is-draft { background: #9ba3a0; }
 
+.fictionist-tree-empty {
+  padding: 24px 10px;
+  color: var(--fiction-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .fictionist-simple-list {
   display: flex;
   flex-direction: column;
@@ -316,6 +405,10 @@
 }
 
 .fictionist-simple-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-height: 36px;
   padding: 7px 10px;
   border: 0;
@@ -327,10 +420,93 @@
   cursor: pointer;
 }
 
+.fictionist-simple-list button small {
+  color: var(--fiction-muted);
+  font-size: 12px;
+}
+
 .fictionist-simple-list button.is-active {
   background: rgba(96, 127, 117, 0.12);
   color: #48675d;
   font-weight: 600;
+}
+
+.fictionist-outline-tree {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.fictionist-outline-tree-group {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--fiction-line);
+}
+
+.fictionist-outline-tree-item {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fiction-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fictionist-outline-tree-item:hover { background: var(--fiction-soft); }
+
+.fictionist-outline-tree-item.is-active {
+  border-color: rgba(96, 127, 117, 0.22);
+  background: rgba(96, 127, 117, 0.12);
+  color: #3f6257;
+}
+
+.fictionist-outline-tree-item > .anticon {
+  color: var(--fiction-blue);
+  font-size: 14px;
+}
+
+.fictionist-outline-tree-item > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fictionist-outline-tree-item strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fictionist-outline-tree-item small {
+  color: var(--fiction-muted);
+  font-size: 10px;
+}
+
+.fictionist-outline-tree-chapters {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 0 14px;
+  padding-left: 8px;
+  border-left: 1px solid var(--fiction-line);
+}
+
+.fictionist-outline-tree-item--chapter {
+  min-height: 38px;
+  grid-template-columns: 25px minmax(0, 1fr);
+  padding-block: 5px;
 }
 
 .fictionist-navigator-footer {
@@ -454,6 +630,17 @@
 .fictionist-empty-copy strong { color: var(--fiction-ink); font-size: 14px; }
 .fictionist-empty-copy span { font-size: 12px; }
 
+.fictionist-empty-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.fictionist-empty-actions .anticon {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
 .fictionist-editor-footer {
   min-height: 30px;
   flex: 0 0 auto;
@@ -474,87 +661,83 @@
   background: #f8faf9;
 }
 
-.fictionist-inspector-sections {
+.fictionist-inspector-content {
+  min-height: 100%;
   display: flex;
   flex-direction: column;
+  gap: 14px;
 }
 
-.fictionist-inspector-sections section {
-  padding: 16px 2px;
-  border-bottom: 1px solid var(--fiction-line);
+.fictionist-insight-empty {
+  min-height: 260px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 10px;
+  color: var(--fiction-muted);
+  text-align: center;
 }
 
-.fictionist-section-heading {
+.fictionist-insight-empty > .anticon { color: var(--fiction-blue); font-size: 25px; }
+.fictionist-insight-empty strong { color: var(--fiction-ink); font-size: 13px; line-height: 1.45; }
+.fictionist-insight-empty span { max-width: 240px; font-size: 12px; line-height: 1.6; }
+
+.fictionist-insight-output {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fictionist-insight-output > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 9px;
-  color: var(--fiction-ink);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.fictionist-section-heading button {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--fiction-blue);
-  font-size: 10px;
-  cursor: pointer;
-}
-
-.fictionist-context-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 5px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fiction-ink);
-  text-align: left;
-  cursor: pointer;
-}
-
-.fictionist-context-row:hover { background: var(--fiction-soft); }
-.fictionist-context-row strong { font-size: 11px; }
-
-.fictionist-avatar {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: rgba(99, 127, 145, 0.13);
-  color: var(--fiction-blue);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.fictionist-avatar--gold {
-  background: rgba(154, 128, 85, 0.14);
-  color: var(--fiction-gold);
-}
-
-.fictionist-facts {
-  margin: 0;
-}
-
-.fictionist-facts div {
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
   gap: 8px;
-  padding: 5px 4px;
-  font-size: 11px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--fiction-line);
 }
 
-.fictionist-facts dt { color: var(--fiction-muted); }
-.fictionist-facts dd { margin: 0; color: var(--fiction-ink); }
+.fictionist-insight-output > header > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 
-.fictionist-thread-list,
+.fictionist-insight-output > header strong { font-size: 13px; }
+.fictionist-insight-output > header small { color: var(--fiction-muted); font-size: 11px; }
+.fictionist-insight-output > header .ant-tag { flex: 0 0 auto; margin: 0; }
+
+.fictionist-insight-markdown {
+  color: #3e4743;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.fictionist-insight-markdown > :first-child { margin-top: 0; }
+.fictionist-insight-markdown > :last-child { margin-bottom: 0; }
+.fictionist-insight-markdown h1,
+.fictionist-insight-markdown h2,
+.fictionist-insight-markdown h3 {
+  margin: 16px 0 7px;
+  color: var(--fiction-ink);
+  letter-spacing: 0;
+  line-height: 1.45;
+}
+.fictionist-insight-markdown h1 { font-size: 15px; }
+.fictionist-insight-markdown h2 { padding-bottom: 5px; border-bottom: 1px solid var(--fiction-line); font-size: 14px; }
+.fictionist-insight-markdown h3 { font-size: 13px; }
+.fictionist-insight-markdown p { margin: 7px 0; }
+.fictionist-insight-markdown ul,
+.fictionist-insight-markdown ol { margin: 7px 0; padding-left: 20px; }
+.fictionist-insight-markdown li { margin: 4px 0; }
+.fictionist-insight-markdown code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+
 .fictionist-context-preview {
   display: flex;
   flex-direction: column;
@@ -564,7 +747,6 @@
   list-style: none;
 }
 
-.fictionist-thread-list li,
 .fictionist-context-preview li {
   display: flex;
   gap: 7px;
@@ -572,34 +754,6 @@
   font-size: 11px;
   line-height: 1.5;
 }
-
-.fictionist-thread-list .anticon { margin-top: 2px; color: var(--fiction-gold); }
-
-.fictionist-check-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 14px;
-}
-
-.fictionist-check-summary,
-.fictionist-check-list button {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--fiction-line);
-  border-radius: 7px;
-  background: #fff;
-  color: var(--fiction-ink);
-  text-align: left;
-}
-
-.fictionist-check-list button { cursor: pointer; }
-.fictionist-check-list button:hover { border-color: rgba(96, 127, 117, 0.32); }
-.fictionist-check-list .anticon { margin-top: 2px; color: var(--fiction-teal); }
-.fictionist-check-list .is-warning .anticon { color: var(--fiction-gold); }
-.fictionist-check-list strong { font-size: 11px; }
 
 .fictionist-content-view {
   flex: 1;
@@ -619,6 +773,124 @@
 }
 
 .fictionist-content-view h1 { margin-bottom: 0; }
+
+.fictionist-outline-editor {
+  width: min(1540px, 100%);
+  margin: 0 auto;
+}
+
+.fictionist-outline-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fictionist-outline-progress {
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 26px;
+  border-block: 1px solid var(--fiction-line);
+  background: #f7f9f8;
+}
+
+.fictionist-outline-progress > span {
+  min-width: 126px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 18px;
+  border-right: 1px solid var(--fiction-line);
+}
+
+.fictionist-outline-progress strong {
+  color: var(--fiction-ink);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.fictionist-outline-progress small {
+  color: var(--fiction-muted);
+  font-size: 11px;
+}
+
+.fictionist-outline-section {
+  padding-bottom: 28px;
+}
+
+.fictionist-outline-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+  gap: 30px;
+}
+
+.fictionist-outline-structured,
+.fictionist-outline-details {
+  min-width: 0;
+}
+
+.fictionist-outline-details {
+  padding-left: 30px;
+  border-left: 1px solid var(--fiction-line);
+}
+
+.fictionist-outline-details textarea {
+  min-height: clamp(480px, calc(100vh - 350px), 760px);
+  padding: 14px 16px;
+  line-height: 1.8;
+  resize: none;
+}
+
+.fictionist-outline-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--fiction-line);
+}
+
+.fictionist-outline-section-heading > span {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.fictionist-outline-section-heading strong {
+  color: var(--fiction-ink);
+  font-size: 15px;
+}
+
+.fictionist-outline-section-heading small {
+  color: var(--fiction-muted);
+  font-size: 11px;
+}
+
+.fictionist-outline-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 22px;
+}
+
+.fictionist-outline-form label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fictionist-outline-form label.is-wide { grid-column: 1 / -1; }
+
+.fictionist-outline-form label > span {
+  color: var(--fiction-ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.fictionist-outline-form textarea {
+  line-height: 1.7;
+  resize: vertical;
+}
 
 .fictionist-library-header {
   min-height: 76px;
@@ -654,27 +926,58 @@
 .fictionist-library-filters {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 2px;
   overflow-y: auto;
 }
 
-.fictionist-filter-label {
-  display: block;
-  padding: 10px 10px 5px;
-  color: var(--fiction-muted);
-  font-size: 12px;
-  font-weight: 650;
+.fictionist-filter-group {
+  overflow: hidden;
+  border: 1px solid var(--fiction-line);
+  border-radius: 7px;
+  background: #fff;
 }
 
-.fictionist-library-filters button {
-  width: 100%;
-  min-height: 40px;
+.fictionist-filter-heading {
+  min-height: 46px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--fiction-line);
+}
+
+.fictionist-filter-group--status .fictionist-filter-heading { background: #edf4f1; }
+.fictionist-filter-group--category .fictionist-filter-heading { background: #f4f1e9; }
+
+.fictionist-filter-heading > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fiction-ink);
+  font-size: 13px;
+}
+
+.fictionist-filter-group--status .fictionist-filter-heading .anticon { color: #52766b; }
+.fictionist-filter-group--category .fictionist-filter-heading .anticon { color: #806b3e; }
+.fictionist-filter-heading small { color: var(--fiction-muted); font-size: 11px; }
+
+.fictionist-filter-options { padding: 6px; }
+
+.fictionist-filter-option {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
   border: 0;
-  border-radius: 6px;
+  border-left: 3px solid transparent;
+  border-radius: 4px;
   background: transparent;
   color: var(--fiction-ink);
   font-size: 13px;
@@ -682,9 +985,30 @@
   cursor: pointer;
 }
 
-.fictionist-library-filters button:hover { background: var(--fiction-soft); }
-.fictionist-library-filters button.is-active { background: rgba(96, 127, 117, 0.12); color: #48675d; font-weight: 650; }
-.fictionist-library-filters button small { color: var(--fiction-muted); font-size: 11px; }
+.fictionist-filter-option > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fictionist-filter-option > span > i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border: 2px solid #7d8985;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.fictionist-filter-option--status-drafting > span > i { border-color: #4f7c6d; background: #72a08f; }
+.fictionist-filter-option--status-paused > span > i { border-color: #9b7b3f; background: #c7a762; }
+.fictionist-filter-option--status-archived > span > i { border-color: #7d8582; background: #aab0ae; }
+.fictionist-filter-option .anticon { flex: 0 0 auto; color: #8a7447; font-size: 13px; }
+.fictionist-filter-option:hover { background: var(--fiction-soft); }
+.fictionist-filter-group--status .fictionist-filter-option.is-active { border-left-color: #5d8276; background: #e5eeea; color: #3f6257; font-weight: 650; }
+.fictionist-filter-group--category .fictionist-filter-option.is-active { border-left-color: #927a46; background: #f0ede4; color: #675731; font-weight: 650; }
+.fictionist-filter-option small { color: var(--fiction-muted); font-size: 11px; }
 
 .fictionist-shelf-toolbar {
   display: flex;
@@ -762,6 +1086,21 @@
 .fictionist-book-cover--blue { background: #526c82; border-left-color: #354b5e; }
 .fictionist-book-cover--red { background: #805454; border-left-color: #623c3c; }
 .fictionist-book-cover--gold { background: #8b7348; border-left-color: #665231; }
+
+.fictionist-book-cover--custom {
+  padding: 0;
+  border-left-width: 1px;
+  background: #e6eae8;
+}
+
+.fictionist-book-cover--custom > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.fictionist-book-cover--custom > em { z-index: 1; }
 
 .fictionist-book-cover > small {
   font-size: 10px;
@@ -869,6 +1208,61 @@
   padding: 0;
 }
 
+.fictionist-delete-warning {
+  color: var(--fiction-ink);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.fictionist-delete-warning p { margin: 0 0 8px; }
+.fictionist-delete-warning p:last-child { margin-bottom: 0; color: var(--fiction-muted); }
+
+.fictionist-cover-editor {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.fictionist-cover-preview {
+  width: 112px;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border: 1px solid var(--fiction-line);
+  border-radius: 5px;
+  background: var(--fiction-soft);
+}
+
+.fictionist-cover-preview > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.fictionist-cover-preview > span {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fiction-muted);
+}
+
+.fictionist-cover-preview .anticon { font-size: 24px; }
+
+.fictionist-cover-controls {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fictionist-cover-controls > strong { color: var(--fiction-ink); font-size: 13px; }
+.fictionist-cover-controls > small { color: var(--fiction-muted); font-size: 12px; line-height: 1.6; }
+.fictionist-cover-controls > div { display: flex; flex-wrap: wrap; gap: 8px; }
+
 .fictionist-new-book-tile > strong { font-size: 15px; }
 
 .fictionist-new-book-cover {
@@ -907,11 +1301,18 @@
 }
 
 .fictionist-table-head,
-.fictionist-canon-table > button {
+.fictionist-canon-row-main {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 88px minmax(220px, 1.5fr);
   align-items: center;
   gap: 12px;
+}
+
+.fictionist-table-head {
+  grid-template-columns: minmax(220px, 560px) minmax(0, 1fr) 96px 112px 76px;
+}
+
+.fictionist-canon-row-main {
+  grid-template-columns: minmax(220px, 560px) 96px 112px;
 }
 
 .fictionist-table-head {
@@ -922,48 +1323,23 @@
   font-weight: 600;
 }
 
-.fictionist-canon-table > button {
-  width: 100%;
-  min-height: 52px;
-  padding: 8px 14px;
-  border: 0;
+.fictionist-canon-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 560px) minmax(0, 1fr) 96px 112px 76px;
+  align-items: stretch;
+  gap: 12px;
+  padding-inline: 14px;
   border-top: 1px solid var(--fiction-line);
   background: #fff;
-  color: var(--fiction-ink);
-  text-align: left;
-  cursor: pointer;
 }
 
-.fictionist-canon-table > button:hover { background: #f7f9f8; }
-.fictionist-canon-table > button > span:first-child { display: flex; align-items: center; gap: 9px; }
-.fictionist-canon-table > button > span:first-child .anticon { color: var(--fiction-blue); }
-.fictionist-canon-table > button small { color: var(--fiction-muted); font-size: 11px; }
-
-.fictionist-timeline {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  padding-left: 16px;
-}
-
-.fictionist-timeline::before {
-  position: absolute;
-  top: 17px;
-  bottom: 17px;
-  left: 23px;
-  width: 1px;
-  background: var(--fiction-line);
-  content: '';
-}
-
-.fictionist-timeline button {
-  position: relative;
+.fictionist-canon-row-main {
+  grid-column: 1 / span 4;
+  width: 100%;
+  min-height: 52px;
   display: grid;
-  grid-template-columns: 16px 145px minmax(220px, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  min-height: 54px;
-  padding: 8px 10px 8px 0;
+  grid-template-columns: subgrid;
+  padding: 8px 0;
   border: 0;
   background: transparent;
   color: var(--fiction-ink);
@@ -971,14 +1347,74 @@
   cursor: pointer;
 }
 
-.fictionist-timeline button:hover { background: #f7f9f8; }
-.fictionist-timeline time { color: var(--fiction-muted); font-size: 11px; }
-.fictionist-timeline strong { font-size: 12px; font-weight: 600; }
+.fictionist-table-head > span:nth-child(1),
+.fictionist-canon-row-main > span:first-child { grid-column: 1; }
+
+.fictionist-table-head > span:nth-child(2),
+.fictionist-canon-row-main .ant-tag { grid-column: 3; }
+
+.fictionist-table-head > span:nth-child(3),
+.fictionist-canon-row-main > small { grid-column: 4; }
+
+.fictionist-table-head > span:nth-child(4),
+.fictionist-canon-row-actions { grid-column: 5; }
+
+.fictionist-canon-row:hover,
+.fictionist-canon-row-main:hover { background: #f7f9f8; }
+.fictionist-canon-row-main > span:first-child { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fictionist-canon-row-main .ant-tag { width: fit-content; min-width: 0; justify-self: start; margin: 0; }
+.fictionist-canon-row-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fictionist-canon-row-main small { overflow: hidden; color: var(--fiction-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.fictionist-canon-row-actions { display: flex; align-items: center; justify-content: center; gap: 2px; padding-right: 8px; }
+.fictionist-canon-row-actions .ant-btn { min-width: 30px; }
+.fictionist-canon-empty { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--fiction-muted); text-align: center; }
+.fictionist-canon-empty > .anticon { color: var(--fiction-blue); font-size: 28px; }
+.fictionist-canon-empty strong { color: var(--fiction-ink); font-size: 14px; }
+.fictionist-canon-empty span { font-size: 12px; }
+
+.fictionist-canon-editor { display: flex; flex-direction: column; gap: 16px; }
+.fictionist-canon-editor label { display: flex; flex-direction: column; gap: 7px; }
+.fictionist-canon-editor label > span { color: var(--fiction-ink); font-size: 13px; font-weight: 650; }
+.fictionist-canon-editor .ant-select { width: 100%; }
+
+.fictionist-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 10px 0 10px 18px;
+}
+
+.fictionist-timeline::before {
+  position: absolute;
+  top: 26px;
+  bottom: 26px;
+  left: 28px;
+  width: 1px;
+  background: var(--fiction-line);
+  content: '';
+}
+
+.fictionist-timeline-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 150px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+  padding: 9px 12px 9px 0;
+  border-bottom: 1px solid var(--fiction-line);
+  color: var(--fiction-ink);
+}
+
+.fictionist-timeline-item:last-child { border-bottom: 0; }
+.fictionist-timeline-item:hover { background: #f8faf9; }
+.fictionist-timeline-item time { color: var(--fiction-muted); font-size: 12px; }
 
 .fictionist-timeline-dot {
   z-index: 1;
-  width: 9px;
-  height: 9px;
+  width: 11px;
+  height: 11px;
   justify-self: center;
   border: 2px solid var(--fiction-paper);
   border-radius: 50%;
@@ -986,10 +1422,137 @@
   box-shadow: 0 0 0 1px rgba(99, 127, 145, 0.25);
 }
 
+.fictionist-timeline-item-content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fictionist-timeline-item-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fictionist-timeline-item-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.fictionist-timeline-item-heading .ant-tag {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.fictionist-timeline-item-content p {
+  margin: 0;
+  color: var(--fiction-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.fictionist-timeline-item-content > small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fiction-muted);
+  font-size: 11px;
+}
+
+.fictionist-timeline-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fictionist-timeline-item-actions .ant-btn { min-width: 30px; }
+
+.fictionist-timeline-empty {
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fiction-muted);
+  text-align: center;
+}
+
+.fictionist-timeline-empty > .anticon { color: var(--fiction-blue); font-size: 28px; }
+.fictionist-timeline-empty strong { color: var(--fiction-ink); font-size: 14px; }
+.fictionist-timeline-empty span { font-size: 12px; }
+
+.fictionist-timeline-form { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.fictionist-timeline-form label { display: flex; flex-direction: column; gap: 7px; }
+.fictionist-timeline-form label > span { color: var(--fiction-ink); font-size: 13px; font-weight: 650; }
+.fictionist-timeline-form .ant-select { width: 100%; }
+.fictionist-timeline-form__wide { grid-column: 1 / -1; }
+
+.fictionist-workflow-view {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.fictionist-workflow-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.fictionist-workflow-section {
+  min-width: 0;
+}
+
+.fictionist-workflow-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--fiction-line);
+}
+
+.fictionist-workflow-section-heading > span:first-child {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fictionist-workflow-section-heading strong {
+  font-size: 16px;
+}
+
+.fictionist-workflow-section-heading small {
+  color: var(--fiction-muted);
+  font-size: 13px;
+}
+
+.fictionist-workflow-section-heading > .fictionist-workflow-section-tools {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.fictionist-workflow-section-tools .ant-input-affix-wrapper {
+  width: 240px;
+}
+
 .fictionist-workflow-list {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--fiction-line);
+  gap: 8px;
 }
 
 .fictionist-workflow-list > div {
@@ -998,8 +1561,125 @@
   align-items: center;
   gap: 14px;
   min-height: 70px;
-  padding: 10px 4px;
-  border-bottom: 1px solid var(--fiction-line);
+  padding: 12px 14px;
+  border: 1px solid var(--fiction-line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.fictionist-workflow-list > .fictionist-system-workflow-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px 16px;
+  background: #fff;
+}
+
+.fictionist-workflow-list > .fictionist-system-workflow-row.is-modified {
+  border-color: rgba(154, 128, 85, 0.5);
+  background: rgba(246, 241, 229, 0.56);
+}
+
+.fictionist-system-workflow-main {
+  display: grid;
+  grid-template-columns: 34px minmax(240px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.fictionist-system-workflow-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fictionist-system-workflow-copy > small {
+  overflow: hidden;
+  color: var(--fiction-muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fictionist-workflow-title-line,
+.fictionist-workflow-card-actions,
+.fictionist-workflow-fallback-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fictionist-workflow-title-line strong {
+  margin-right: 2px;
+  font-size: 15px;
+}
+
+.fictionist-workflow-title-line .ant-tag,
+.fictionist-workflow-binding-status .ant-tag {
+  margin-inline-end: 0;
+}
+
+.fictionist-workflow-card-actions {
+  justify-content: flex-end;
+}
+
+.fictionist-workflow-fallback-control {
+  flex: 0 0 auto;
+  padding-left: 2px;
+  color: var(--fiction-ink);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.fictionist-workflow-modified-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: rgba(154, 128, 85, 0.12);
+  color: #6f5a36;
+}
+
+.fictionist-workflow-modified-note > .anticon { margin-top: 3px; }
+
+.fictionist-workflow-modified-note > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fictionist-workflow-modified-note strong { font-size: 13px; }
+.fictionist-workflow-modified-note small { color: #786746; font-size: 12px; }
+
+.fictionist-workflow-list--saved > div {
+  background: rgba(220, 232, 226, 0.4);
+}
+
+.fictionist-workflow-list--saved > div:hover {
+  border-color: rgba(96, 127, 117, 0.32);
+  background: rgba(220, 232, 226, 0.72);
+}
+
+.fictionist-workflow-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 76px;
+  padding: 0 14px;
+  border: 1px dashed var(--fiction-line);
+  border-radius: 8px;
+  background: #fafbfa;
+  color: var(--fiction-muted);
+  font-size: 13px;
+}
+
+.fictionist-workflow-empty .anticon {
+  color: var(--fiction-teal);
+  font-size: 16px;
 }
 
 .fictionist-workflow-icon {
@@ -1015,7 +1695,49 @@
   font-weight: 700;
 }
 
-.fictionist-workflow-list strong { font-size: 12px; }
+.fictionist-workflow-list strong { font-size: 13px; }
+
+.fictionist-workflow-binding > p {
+  margin: 0 0 14px;
+  color: var(--fiction-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.fictionist-workflow-binding-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.fictionist-workflow-binding-list > div {
+  display: grid;
+  grid-template-columns: 34px minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 66px;
+  padding: 11px 13px;
+  border: 1px solid var(--fiction-line);
+  border-radius: 8px;
+  background: #f8faf9;
+}
+
+.fictionist-workflow-binding-list > div > span:nth-child(2) {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fictionist-workflow-binding-list strong { font-size: 14px; }
+.fictionist-workflow-binding-list small { color: var(--fiction-muted); font-size: 12px; }
+
+.fictionist-workflow-binding-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
 
 .fictionist-modal-copy {
   margin: 0 0 12px;
@@ -1057,6 +1779,365 @@
   font-weight: 600;
 }
 
+.fictionist-continuation-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  margin-bottom: 16px;
+}
+
+.fictionist-continuation-form__wide {
+  grid-column: 1 / -1;
+}
+
+.fictionist-writing-requirements {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.fictionist-writing-requirements__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fictionist-writing-requirements__header > span {
+  color: var(--fiction-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fictionist-writing-requirements__source {
+  color: var(--fiction-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.fictionist-context-details {
+  margin-top: 12px;
+  border: 1px solid var(--fiction-line);
+  border-radius: 7px;
+  background: #fafcfb;
+}
+
+.fictionist-context-details summary {
+  padding: 9px 12px;
+  color: var(--fiction-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fictionist-context-details pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-top: 1px solid var(--fiction-line);
+  color: var(--fiction-ink);
+  font-family: "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fictionist-draft-review textarea {
+  min-height: 420px !important;
+  resize: vertical;
+  font-family: "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.fictionist-book-search .ant-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+.fictionist-book-replace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.fictionist-book-search-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.fictionist-book-search-empty,
+.fictionist-book-search-loading {
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--fiction-muted);
+  text-align: center;
+}
+
+.fictionist-book-search-empty > .anticon {
+  color: #71847d;
+  font-size: 28px;
+}
+
+.fictionist-book-search-empty strong { color: var(--fiction-ink); font-size: 15px; }
+.fictionist-book-search-empty span,
+.fictionist-book-search-loading span { font-size: 12px; }
+
+.fictionist-book-search-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: var(--fiction-ink);
+  font-size: 13px;
+}
+
+.fictionist-book-search-summary span { color: var(--fiction-muted); font-size: 11px; }
+
+.fictionist-book-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.fictionist-book-search-list > button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--fiction-line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--fiction-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fictionist-book-search-list > button:hover {
+  border-color: rgba(96, 127, 117, 0.42);
+  background: #f7faf8;
+}
+
+.fictionist-book-search-list > button > strong { font-size: 14px; }
+.fictionist-book-search-list > button > span:last-child {
+  color: var(--fiction-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.fictionist-book-search-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fictionist-book-search-meta small {
+  overflow: hidden;
+  color: var(--fiction-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fictionist-book-search-meta .ant-tag { margin: 0; }
+
+.fictionist-outline-dialog-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fictionist-outline-dialog-form > label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.fictionist-outline-dialog-form > label > span:first-child {
+  color: var(--fiction-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fictionist-outline-dialog-form > label:has(textarea),
+.fictionist-outline-file-picker,
+.fictionist-outline-source-preview,
+.fictionist-outline-dialog-form > .fictionist-modal-note {
+  grid-column: 1 / -1;
+}
+
+.fictionist-outline-file-picker {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px dashed #aebdb8;
+  border-radius: 7px;
+  background: #f8faf9;
+}
+
+.fictionist-outline-file-picker > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fictionist-outline-file-picker strong {
+  overflow: hidden;
+  color: var(--fiction-ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fictionist-outline-file-picker small { color: var(--fiction-muted); font-size: 12px; }
+
+.fictionist-outline-source-preview {
+  max-height: 260px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--fiction-line);
+  border-radius: 7px;
+  background: #fbfcfb;
+  color: var(--fiction-ink);
+  font-family: "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fictionist-outline-review {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.fictionist-outline-review-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--fiction-line);
+  border-radius: 7px;
+  background: #f7faf8;
+}
+
+.fictionist-outline-review-summary > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fictionist-outline-review-summary small { color: var(--fiction-muted); font-size: 11px; }
+.fictionist-outline-review-summary strong { color: var(--fiction-ink); font-size: 14px; }
+.fictionist-outline-review-summary .ant-tag { margin: 0; }
+
+.fictionist-outline-review section {
+  color: var(--fiction-ink);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.fictionist-outline-review section ul { margin-block: 8px 0; padding-left: 20px; }
+.fictionist-outline-review section p { margin: 8px 0 0; color: var(--fiction-muted); }
+
+.fictionist-outline-review-results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fictionist-outline-review-entry {
+  border: 1px solid var(--fiction-line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.fictionist-outline-review-entry > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--fiction-line);
+  background: #f7faf8;
+}
+
+.fictionist-outline-review-entry > header > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fictionist-outline-review-entry > header small {
+  color: var(--fiction-muted);
+  font-size: 11px;
+}
+
+.fictionist-outline-review-entry > header strong {
+  color: var(--fiction-ink);
+  font-size: 14px;
+}
+
+.fictionist-outline-review-entry > header .ant-tag { margin: 0; }
+
+.fictionist-outline-review-entry dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+}
+
+.fictionist-outline-review-entry dl > div {
+  min-width: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--fiction-line);
+}
+
+.fictionist-outline-review-entry dl > div:nth-last-child(-n + 2) { border-bottom: 0; }
+
+.fictionist-outline-review-entry dl > div:nth-child(even) {
+  border-left: 1px solid var(--fiction-line);
+}
+
+.fictionist-outline-review-entry dl > div.is-details {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--fiction-line);
+  border-bottom: 0;
+  border-left: 0;
+}
+
+.fictionist-outline-review-entry dt {
+  margin-bottom: 5px;
+  color: var(--fiction-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.fictionist-outline-review-entry dd {
+  margin: 0;
+  color: var(--fiction-ink);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 @media (max-width: 1120px) {
   .fictionist-layout {
     grid-template-columns: 62px 238px minmax(420px, 1fr);
@@ -1073,7 +2154,6 @@
 @media (max-width: 900px) {
   .fictionist-project-bar { gap: 10px; padding-inline: 12px; }
   .fictionist-project-stats { display: none; }
-  .fictionist-project-actions .fictionist-search-action { display: none; }
   .fictionist-layout { grid-template-columns: 56px 210px minmax(360px, 1fr); }
   .fictionist-layout--library { grid-template-columns: 210px minmax(360px, 1fr); }
   .fictionist-rail { padding-inline: 5px; }
@@ -1114,22 +2194,10 @@
   font-size: 13px;
 }
 
-.fictionist-section-heading {
-  font-size: 13px;
-}
-
-.fictionist-section-heading button {
-  font-size: 12px;
-}
-
-.fictionist-context-row strong,
-.fictionist-check-list strong,
 .fictionist-workflow-list strong {
   font-size: 13px;
 }
 
-.fictionist-facts div,
-.fictionist-thread-list li,
 .fictionist-context-preview li,
 .fictionist-workflow-list > div > span:nth-child(2) small {
   font-size: 12px;
