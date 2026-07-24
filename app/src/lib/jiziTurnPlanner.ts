@@ -69,7 +69,8 @@ function normalizeSearchDecision(
 function normalizeOutputFormat(value: unknown): AgentOutputFormat | undefined {
   const raw = optionalTextValue(value)?.toLowerCase();
   if (!raw) return undefined;
-  if (['markdown', 'md', '文本'].includes(raw)) return 'markdown';
+  if (['txt', 'text', '纯文本', '文本'].includes(raw)) return 'txt';
+  if (['markdown', 'md'].includes(raw)) return 'markdown';
   if (['docx', 'word', '文档'].includes(raw)) return 'docx';
   if (['xlsx', 'excel', '表格'].includes(raw)) return 'xlsx';
   if (['mindmap', 'html', '思维导图'].includes(raw)) return 'mindmap';
@@ -291,7 +292,7 @@ function buildPlannerPrompt(
     'action steps 只允许：create-canvas、rename-active-canvas、create-agent、add-node、connect-nodes、delete-node、set-node-output-format、update-agent、update-node-agent-config、delete-canvas、delete-tool、run-active-canvas。',
     '修改 Agent 或节点配置必须提供稳定 agentId，或 canvasId+nodeId，并把白名单字段放入 patch。删除画布必须提供 canvasId，删除工具必须提供 toolName；禁止只靠显示名称猜测目标。',
     'add-node 造节点时，必须为每个节点写出 systemPrompt（该节点完整的任务指令，将作为它的系统角色）和 description（一句话职责）。任务语义只由 systemPrompt+description 承载，节点名(label)只用于展示，不要靠节点名传达任务。systemPrompt 必须控制在 14000 字符以内。',
-    'outputFormat 只能是 markdown、docx、xlsx、mindmap。用户说 Word 对应 docx，Excel 对应 xlsx。',
+    'outputFormat 只能是 txt、markdown、docx、xlsx、mindmap。用户说纯文本对应 txt，Word 对应 docx，Excel 对应 xlsx。',
     '不允许规划批量运行、运行全部画布；只能规划 run-active-canvas 或回到 chat 说明。',
     '',
     '只返回 JSON，不要 Markdown，不要解释。',

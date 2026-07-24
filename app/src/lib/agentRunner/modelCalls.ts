@@ -44,13 +44,19 @@ function buildUserContent(
 export function buildPrompt(node: Node, input: string): string {
   const data = node.data as AgentNodeData;
   const format = outputFormatForNode(node);
-  const outputSchemaText = schemaTextFromNode(node, 'outputSchemaText');
+  // TXT is intentionally unstructured. Ignore a stale schema left on a node
+  // instead of giving the model contradictory plain-text and JSON instructions.
+  const outputSchemaText = format === 'txt'
+    ? ''
+    : schemaTextFromNode(node, 'outputSchemaText');
   const outputRuleText =
     data.outputRuleEnabled && typeof data.outputRuleText === 'string'
       ? data.outputRuleText.trim()
       : '';
   const outputInstruction =
-    format === 'markdown'
+    format === 'txt'
+      ? '请根据输入完成该节点任务，只输出纯文本正文。不要使用 Markdown 标记，不要返回 JSON，不要解释输出格式。'
+      : format === 'markdown'
       ? '请根据输入完成该节点任务，并输出可直接保存为 Markdown 的结果。'
       : format === 'docx'
         ? '请根据输入完成该节点任务，并且只输出合法 JSON，不要使用 Markdown 代码块。JSON 格式为 {"title":"文档标题","sections":[{"heading":"章节标题","paragraphs":["段落"],"table":{"headers":["列名"],"rows":[["单元格"]]}}]}。没有表格时可以省略 table。'

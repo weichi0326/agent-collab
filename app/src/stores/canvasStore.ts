@@ -19,10 +19,13 @@ import { recomputeDerived } from './canvas/derived';
 import { recoverRunNodes, recoverRunState } from './canvas/runRecovery';
 import { clearOrchestratorRunDiagnosis } from '../lib/orchestratorBridge';
 import type { RoutePoint } from '../lib/orthogonalRoute';
+import type { ProfessionalTaskOrigin } from '../features/professionalTasks/domain';
+import type { ProfessionalTaskHistoryDescriptor } from '../features/professionalTasks/domain';
 import {
   cloneEdges,
   cloneRunNodes,
   createRunSnapshotTab,
+  createRunHistoryMetadata,
   createRunningArtifacts,
   expandedRunGraph,
   markDeletedOutputs,
@@ -36,6 +39,9 @@ import {
   type CanvasRunState,
   type CanvasOpenResult,
   type CreatedRun,
+  type CreatedSavedWorkflowCanvas,
+  type CreatedWorkflowCanvas,
+  type CanvasWorkflowRef,
   type RunRecord,
   type SavedCanvas,
   type Snapshot,
@@ -57,6 +63,9 @@ export type {
   CanvasRunStatus,
   CanvasOpenResult,
   CreatedRun,
+  CreatedSavedWorkflowCanvas,
+  CreatedWorkflowCanvas,
+  CanvasWorkflowRef,
   RunRecord,
   SavedCanvas,
 } from './canvas/types';
@@ -73,6 +82,14 @@ const HISTORY_GLOBAL_LIMIT = 200;
 const HISTORY_PER_CANVAS_LIMIT = 50;
 // 快照全局单调递增序号,用于跨画布裁剪时按最旧优先淘汰。
 let historySeq = 0;
+
+function isLockedSystemWorkflow(canvas: Canvas | SavedCanvas): boolean {
+  return canvas.workflowRef?.systemWorkflow?.version === 2;
+}
+
+function isProtectedSystemWorkflow(canvas: Canvas | SavedCanvas): boolean {
+  return Boolean(canvas.workflowRef?.systemWorkflow);
+}
 
 // 把某画布当前状态压入撤销历史,并做单画布 + 全局总量双重裁剪。纯函数,返回新的 history。
 // 供 pushHistory 动作与各结构性变更动作内联复用,确保「所有改动入口统一入栈」。
@@ -120,6 +137,47 @@ interface CanvasState {
   ensureCanvas: () => void;
   recoverInterruptedRuns: () => number;
   addCanvas: () => string | null;
+  clearCanvasData: () => void;
+  clearRunHistory: () => void;
+  createCanvasFromTemplate: (
+    name: string,
+    nodes: Node[],
+    edges: Edge[],
+    origin?: ProfessionalTaskOrigin,
+    workflowRef?: CanvasWorkflowRef,
+  ) => string | null;
+  createWorkflowCanvas: (
+    name: string,
+    scope: Omit<CanvasWorkflowRef, 'workflowId'>,
+    template?: {
+      nodes?: Node[];
+      edges?: Edge[];
+      readOnly?: boolean;
+    },
+  ) => CreatedWorkflowCanvas | null;
+  createSavedWorkflowCanvas: (
+    name: string,
+    scope: Omit<CanvasWorkflowRef, 'workflowId'>,
+    template?: {
+      nodes?: Node[];
+      edges?: Edge[];
+      readOnly?: boolean;
+    },
+  ) => CreatedSavedWorkflowCanvas | null;
+  ensureSavedSystemWorkflowCanvas: (
+    name: string,
+    scope: Omit<CanvasWorkflowRef, 'workflowId'> & {
+      systemWorkflow: NonNullable<CanvasWorkflowRef['systemWorkflow']>;
+    },
+    template: {
+      nodes?: Node[];
+      edges?: Edge[];
+      readOnly?: boolean;
+    },
+  ) => CreatedSavedWorkflowCanvas | null;
+  resetSavedSystemWorkflow: (savedId: string, nodes: Node[], edges: Edge[]) => boolean;
+  removeProjectSystemWorkflows: (packageId: string, projectId: string) => void;
+  removePackageCanvases: (packageId: string) => void;
   removeCanvas: (id: string) => void;
   renameCanvas: (id: string, name: string) => void;
   setActive: (id: string) => void;
@@ -162,7 +220,10 @@ interface CanvasState {
   // 导入外部画布:重建为一张未保存的新 tab(无 savedId),画布数达上限返回 false。
   importCanvas: (name: string, nodes: Node[], edges: Edge[]) => boolean;
 
-  createRun: (canvasId: string) => CreatedRun | null;
+  createRun: (
+    canvasId: string,
+    historyDescriptor?: ProfessionalTaskHistoryDescriptor,
+  ) => CreatedRun | null;
   syncRunSnapshot: (runId: string, canvasId: string) => void;
   markOutputItemsDeleted: (
     canvasId: string,
@@ -237,6 +298,346 @@ export const useCanvasStore = create<CanvasState>()(
         return createdId;
       },
 
+      clearCanvasData: () => set({
+        canvases: [],
+        activeId: '',
+        savedCanvases: [],
+        runHistory: [],
+        history: {},
+      }),
+
+      clearRunHistory: () => set((s) => {
+        const removedIds = new Set(
+          s.canvases.filter((canvas) => canvas.runId).map((canvas) => canvas.id),
+        );
+        const canvases = s.canvases.filter((canvas) => !removedIds.has(canvas.id));
+        return {
+          canvases,
+          activeId: removedIds.has(s.activeId) ? canvases.at(-1)?.id ?? '' : s.activeId,
+          runHistory: [],
+          history: Object.fromEntries(
+            Object.entries(s.history).filter(([canvasId]) => !removedIds.has(canvasId)),
+          ),
+        };
+      }),
+
+      createCanvasFromTemplate: (name, nodes, edges, origin, workflowRef) => {
+        let createdId: string | null = null;
+        set((s) => {
+          if (s.canvases.length >= MAX_CANVASES) return s;
+          const d = recomputeDerived(
+            nodes.map((node) => ({ ...node, data: { ...node.data } })),
+            edges.map((edge) => ({ ...edge })),
+          );
+          const canvas: Canvas = {
+            id: uid('c'),
+            name: name.trim() || makeCanvas(s.canvases).name,
+            nodes: d.nodes,
+            edges: d.edges,
+            origin,
+            workflowRef,
+          };
+          createdId = canvas.id;
+          return { canvases: [...s.canvases, canvas], activeId: canvas.id };
+        });
+        return createdId;
+      },
+
+      // 工作流是可复用的已保存画布:一次 set 同时创建 tab 与 saved record,
+      // 避免达到画布上限或切换视图失败时留下半条工作流。
+      createWorkflowCanvas: (name, scope, template) => {
+        let created: CreatedWorkflowCanvas | null = null;
+        set((s) => {
+          const finalName = name.trim();
+          const hasNameConflict = (canvas: Canvas | SavedCanvas) => {
+            if (canvas.name !== finalName) return false;
+            // Reusable workflows are scoped to a professional package project;
+            // ordinary canvases (or legacy records without a scope) keep the
+            // existing global name constraint.
+            return !canvas.workflowRef
+              || (canvas.workflowRef.packageId === scope.packageId
+                && canvas.workflowRef.projectId === scope.projectId);
+          };
+          if (!finalName
+            || s.canvases.length >= MAX_CANVASES
+            || s.canvases.some(hasNameConflict)
+            || s.savedCanvases.some(hasNameConflict)) {
+            return s;
+          }
+          const canvasId = uid('c');
+          const savedId = uid('s');
+          const workflowId = uid('w');
+          const workflowRef: CanvasWorkflowRef = { ...scope, workflowId };
+          const d = recomputeDerived(
+            (template?.nodes ?? []).map((node) => ({
+              ...node,
+              data: { ...node.data },
+            })),
+            (template?.edges ?? []).map((edge) => ({ ...edge })),
+          );
+          const canvas: Canvas = {
+            id: canvasId,
+            name: finalName,
+            nodes: d.nodes,
+            edges: d.edges,
+            savedId,
+            workflowRef,
+            readOnly: template?.readOnly,
+          };
+          const saved: SavedCanvas = {
+            id: savedId,
+            name: finalName,
+            nodes: d.nodes,
+            edges: d.edges,
+            savedAt: datetime(),
+            readOnly: template?.readOnly,
+            workflowRef,
+          };
+          created = { canvasId, savedId, workflowId };
+          return {
+            canvases: [...s.canvases, canvas],
+            activeId: canvasId,
+            savedCanvases: [...s.savedCanvases, saved],
+          };
+        });
+        return created;
+      },
+
+      createSavedWorkflowCanvas: (name, scope, template) => {
+        let created: CreatedSavedWorkflowCanvas | null = null;
+        set((s) => {
+          const finalName = name.trim();
+          const hasNameConflict = (canvas: Canvas | SavedCanvas) => canvas.name === finalName
+            && (!canvas.workflowRef
+              || (canvas.workflowRef.packageId === scope.packageId
+                && canvas.workflowRef.projectId === scope.projectId));
+          if (!finalName
+            || s.canvases.some(hasNameConflict)
+            || s.savedCanvases.some(hasNameConflict)) return s;
+          const savedId = uid('s');
+          const workflowId = uid('w');
+          const workflowRef: CanvasWorkflowRef = { ...scope, workflowId };
+          const graph = recomputeDerived(
+            (template?.nodes ?? []).map((node) => ({
+              ...node,
+              data: { ...node.data },
+            })),
+            (template?.edges ?? []).map((edge) => ({ ...edge })),
+          );
+          const saved: SavedCanvas = {
+            id: savedId,
+            name: finalName,
+            nodes: graph.nodes,
+            edges: graph.edges,
+            savedAt: datetime(),
+            readOnly: template?.readOnly,
+            workflowRef,
+          };
+          created = { savedId, workflowId };
+          return { savedCanvases: [...s.savedCanvases, saved] };
+        });
+        return created;
+      },
+
+      ensureSavedSystemWorkflowCanvas: (name, scope, template) => {
+        let ensured: CreatedSavedWorkflowCanvas | null = null;
+        set((s) => {
+          const finalName = name.trim();
+          if (!finalName) return s;
+          const normalizedSystemName = (value: string) => value
+            .replaceAll('AI 起草本章', 'AI 起草')
+            .replaceAll('保底流程', '备用流程')
+            .replaceAll('1号主流程', '主流程')
+            .replaceAll('1 号主流程', '主流程')
+            .replaceAll('2号备用流程', '备用流程')
+            .replaceAll('2 号备用流程', '备用流程');
+          const matchesScope = (canvas: Canvas | SavedCanvas) => {
+            const ref = canvas.workflowRef;
+            return ref?.packageId === scope.packageId
+              && ref.projectId === scope.projectId
+              && ref.systemWorkflow?.key === scope.systemWorkflow.key
+              && ref.systemWorkflow.version === scope.systemWorkflow.version;
+          };
+          const matchesMalformedLegacy = (canvas: Canvas | SavedCanvas) => {
+            const ref = canvas.workflowRef;
+            return normalizedSystemName(canvas.name) === normalizedSystemName(finalName)
+              && ref?.packageId === scope.packageId
+              && ref.projectId === scope.projectId
+              && Boolean(ref.systemWorkflow);
+          };
+          const templateGraph = () => recomputeDerived(
+            (template.nodes ?? []).map((node) => ({
+              ...node,
+              data: { ...node.data },
+            })),
+            (template.edges ?? []).map((edge) => ({ ...edge })),
+          );
+          const locked = scope.systemWorkflow.version === 2;
+          const saved = s.savedCanvases.find(matchesScope)
+            ?? s.savedCanvases.find(matchesMalformedLegacy);
+
+          if (saved) {
+            const workflowId = saved.workflowRef?.workflowId ?? uid('w');
+            const workflowRef: CanvasWorkflowRef = { ...scope, workflowId };
+            const graph = locked ? templateGraph() : undefined;
+            ensured = { savedId: saved.id, workflowId };
+            return {
+              savedCanvases: s.savedCanvases.map((canvas) => canvas.id === saved.id
+                ? {
+                    ...canvas,
+                    name: finalName,
+                    nodes: graph?.nodes ?? canvas.nodes,
+                    edges: graph?.edges ?? canvas.edges,
+                    readOnly: locked ? true : false,
+                    workflowRef,
+                  }
+                : canvas),
+              canvases: s.canvases.map((canvas) => canvas.savedId === saved.id
+                ? {
+                    ...canvas,
+                    name: finalName,
+                    nodes: graph?.nodes ?? canvas.nodes,
+                    edges: graph?.edges ?? canvas.edges,
+                    readOnly: locked ? true : false,
+                    workflowRef,
+                  }
+                : canvas),
+            };
+          }
+
+          const open = s.canvases.find(matchesScope)
+            ?? s.canvases.find(matchesMalformedLegacy);
+          if (open) {
+            const savedId = open.savedId ?? uid('s');
+            const workflowId = open.workflowRef?.workflowId ?? uid('w');
+            const workflowRef: CanvasWorkflowRef = { ...scope, workflowId };
+            const graph = locked
+              ? templateGraph()
+              : recomputeDerived(
+                  open.nodes.map((node) => ({ ...node, data: { ...node.data } })),
+                  open.edges.map((edge) => ({ ...edge })),
+                );
+            ensured = { savedId, workflowId };
+            const savedCanvas: SavedCanvas = {
+              id: savedId,
+              name: finalName,
+              nodes: graph.nodes,
+              edges: graph.edges,
+              savedAt: datetime(),
+              readOnly: locked ? true : false,
+              workflowRef,
+            };
+            return {
+              savedCanvases: [...s.savedCanvases, savedCanvas],
+              canvases: s.canvases.map((canvas) => canvas.id === open.id
+                ? {
+                    ...canvas,
+                    name: finalName,
+                    nodes: graph.nodes,
+                    edges: graph.edges,
+                    savedId,
+                    readOnly: locked ? true : false,
+                    workflowRef,
+                  }
+                : canvas),
+            };
+          }
+
+          const graph = templateGraph();
+          const savedId = uid('s');
+          const workflowId = uid('w');
+          const workflowRef: CanvasWorkflowRef = { ...scope, workflowId };
+          const savedCanvas: SavedCanvas = {
+            id: savedId,
+            name: finalName,
+            nodes: graph.nodes,
+            edges: graph.edges,
+            savedAt: datetime(),
+            readOnly: locked ? true : template.readOnly,
+            workflowRef,
+          };
+          ensured = { savedId, workflowId };
+          return { savedCanvases: [...s.savedCanvases, savedCanvas] };
+        });
+        return ensured;
+      },
+
+      resetSavedSystemWorkflow: (savedId, nodes, edges) => {
+        let reset = false;
+        set((s) => {
+          const saved = s.savedCanvases.find((canvas) => canvas.id === savedId);
+          if (!saved || saved.workflowRef?.systemWorkflow?.version !== 1) return s;
+          const graph = recomputeDerived(
+            nodes.map((node) => ({ ...node, data: { ...node.data } })),
+            edges.map((edge) => ({ ...edge })),
+          );
+          const open = s.canvases.find((canvas) => canvas.savedId === savedId);
+          reset = true;
+          return {
+            history: open ? pushCanvasSnapshot(s.history, open) : s.history,
+            savedCanvases: s.savedCanvases.map((canvas) => canvas.id === savedId
+              ? { ...canvas, nodes: graph.nodes, edges: graph.edges, savedAt: datetime() }
+              : canvas),
+            canvases: s.canvases.map((canvas) => canvas.savedId === savedId
+              ? { ...canvas, nodes: graph.nodes, edges: graph.edges }
+              : canvas),
+          };
+        });
+        return reset;
+      },
+
+      removeProjectSystemWorkflows: (packageId, projectId) => set((s) => {
+        const belongsToProject = (canvas: Canvas | SavedCanvas | RunRecord) =>
+          canvas.workflowRef?.packageId === packageId
+          && canvas.workflowRef.projectId === projectId
+          && Boolean(canvas.workflowRef.systemWorkflow);
+        const removedIds = new Set(
+          s.canvases.filter(belongsToProject).map((canvas) => canvas.id),
+        );
+        const canvases = s.canvases.filter((canvas) => !removedIds.has(canvas.id));
+        return {
+          canvases,
+          savedCanvases: s.savedCanvases.filter((canvas) => !belongsToProject(canvas)),
+          runHistory: s.runHistory.filter((record) => !belongsToProject(record)),
+          activeId: removedIds.has(s.activeId) ? canvases.at(-1)?.id ?? '' : s.activeId,
+          history: Object.fromEntries(
+            Object.entries(s.history).filter(([canvasId]) => !removedIds.has(canvasId)),
+          ),
+        };
+      }),
+
+      removePackageCanvases: (packageId) => set((s) => {
+        const packageSavedIds = new Set(
+          s.savedCanvases
+            .filter((canvas) => canvas.workflowRef?.packageId === packageId)
+            .map((canvas) => canvas.id),
+        );
+        const removedIds = new Set(
+          s.canvases
+            .filter((canvas) => canvas.origin?.packageId === packageId
+              || canvas.workflowRef?.packageId === packageId
+              || (canvas.savedId ? packageSavedIds.has(canvas.savedId) : false))
+            .map((canvas) => canvas.id),
+        );
+        const canvases = s.canvases.filter((canvas) => !removedIds.has(canvas.id));
+        const history = Object.fromEntries(
+          Object.entries(s.history).filter(([canvasId]) => !removedIds.has(canvasId)),
+        );
+        return {
+          canvases,
+          savedCanvases: s.savedCanvases.filter(
+            (canvas) => canvas.origin?.packageId !== packageId
+              && canvas.workflowRef?.packageId !== packageId,
+          ),
+          runHistory: s.runHistory.filter(
+            (record) => record.origin?.packageId !== packageId
+              && record.workflowRef?.packageId !== packageId,
+          ),
+          activeId: removedIds.has(s.activeId) ? canvases.at(-1)?.id ?? '' : s.activeId,
+          history,
+        };
+      }),
+
       removeCanvas: (id) =>
         set((s) => {
           const target = s.canvases.find((c) => c.id === id);
@@ -257,7 +658,7 @@ export const useCanvasStore = create<CanvasState>()(
       renameCanvas: (id, name) =>
         set((s) => {
           const c = s.canvases.find((x) => x.id === id);
-          if (!c || c.name === name) return s;
+          if (!c || c.readOnly || isLockedSystemWorkflow(c) || c.name === name) return s;
           return {
             history: pushCanvasSnapshot(s.history, c),
             canvases: s.canvases.map((x) =>
@@ -270,17 +671,21 @@ export const useCanvasStore = create<CanvasState>()(
 
       applyNodes: (id, changes) =>
         set((s) => ({
-          canvases: s.canvases.map((c) =>
-            c.id === id
-              ? { ...c, nodes: applyNodeChanges(changes, c.nodes) }
-              : c,
-          ),
+          canvases: s.canvases.map((c) => {
+            if (c.id !== id) return c;
+            const allowedChanges = c.readOnly || isLockedSystemWorkflow(c)
+              ? changes.filter((change) => change.type === 'select')
+              : changes;
+            return allowedChanges.length > 0
+              ? { ...c, nodes: applyNodeChanges(allowedChanges, c.nodes) }
+              : c;
+          }),
         })),
 
       applyEdges: (id, changes) =>
         set((s) => ({
           canvases: s.canvases.map((c) =>
-            c.id === id
+            c.id === id && !c.readOnly && !isLockedSystemWorkflow(c)
               ? { ...c, edges: applyEdgeChanges(changes, c.edges) }
               : c,
           ),
@@ -289,7 +694,7 @@ export const useCanvasStore = create<CanvasState>()(
       connect: (id, connection) =>
         set((s) => {
           const target = s.canvases.find((c) => c.id === id);
-          if (!target) return s;
+          if (!target || target.readOnly || isLockedSystemWorkflow(target)) return s;
           return {
           history: pushCanvasSnapshot(s.history, target),
           canvases: s.canvases.map((c) => {
@@ -321,7 +726,7 @@ export const useCanvasStore = create<CanvasState>()(
       setEdgeRoute: (canvasId, edgeId, routePoints) =>
         set((s) => ({
           canvases: s.canvases.map((canvas) =>
-            canvas.id !== canvasId
+            canvas.id !== canvasId || canvas.readOnly || isLockedSystemWorkflow(canvas)
               ? canvas
               : {
                   ...canvas,
@@ -343,7 +748,7 @@ export const useCanvasStore = create<CanvasState>()(
       addNode: (id, node) =>
         set((s) => {
           const target = s.canvases.find((c) => c.id === id);
-          if (!target) return s;
+          if (!target || target.readOnly || isLockedSystemWorkflow(target)) return s;
           return {
             history: pushCanvasSnapshot(s.history, target),
             canvases: s.canvases.map((c) => {
@@ -357,14 +762,16 @@ export const useCanvasStore = create<CanvasState>()(
       pushHistory: (id) =>
         set((s) => {
           const c = s.canvases.find((x) => x.id === id);
-          if (!c) return s;
+          if (!c || c.readOnly || isLockedSystemWorkflow(c)) return s;
           return { history: pushCanvasSnapshot(s.history, c) };
         }),
 
       undo: (id) =>
         set((s) => {
+          const target = s.canvases.find((canvas) => canvas.id === id);
           const stack = s.history[id];
-          if (!stack || stack.length === 0) return s;
+          if (!target || target.readOnly || isLockedSystemWorkflow(target)
+            || !stack || stack.length === 0) return s;
           const snap = stack[stack.length - 1];
           return {
             history: { ...s.history, [id]: stack.slice(0, -1) },
@@ -379,7 +786,7 @@ export const useCanvasStore = create<CanvasState>()(
       recompute: (id) =>
         set((s) => ({
           canvases: s.canvases.map((c) => {
-            if (c.id !== id) return c;
+            if (c.id !== id || c.readOnly || isLockedSystemWorkflow(c)) return c;
             const d = recomputeDerived(c.nodes, c.edges);
             return { ...c, nodes: d.nodes, edges: d.edges };
           }),
@@ -389,7 +796,7 @@ export const useCanvasStore = create<CanvasState>()(
       addGraph: (id, newNodes, newEdges) =>
         set((s) => {
           const target = s.canvases.find((c) => c.id === id);
-          if (!target) return s;
+          if (!target || target.readOnly || isLockedSystemWorkflow(target)) return s;
           return {
             history: pushCanvasSnapshot(s.history, target),
             canvases: s.canvases.map((c) => {
@@ -413,7 +820,7 @@ export const useCanvasStore = create<CanvasState>()(
       updateNodeData: (canvasId, nodeId, patch) =>
         set((s) => ({
           canvases: s.canvases.map((c) =>
-            c.id === canvasId
+            c.id === canvasId && !c.readOnly && !isLockedSystemWorkflow(c)
               ? {
                   ...c,
                   nodes: c.nodes.map((n) =>
@@ -459,7 +866,7 @@ export const useCanvasStore = create<CanvasState>()(
       toggleCollapse: (id, nodeId) =>
         set((s) => {
           const target = s.canvases.find((c) => c.id === id);
-          if (!target) return s;
+          if (!target || target.readOnly || isLockedSystemWorkflow(target)) return s;
           return {
             history: pushCanvasSnapshot(s.history, target),
             canvases: s.canvases.map((c) => {
@@ -485,7 +892,7 @@ export const useCanvasStore = create<CanvasState>()(
       setAllCollapsed: (id, collapsed) =>
         set((s) => {
           const target = s.canvases.find((c) => c.id === id);
-          if (!target) return s;
+          if (!target || target.readOnly || isLockedSystemWorkflow(target)) return s;
           return {
             history: pushCanvasSnapshot(s.history, target),
             canvases: s.canvases.map((c) => {
@@ -507,10 +914,13 @@ export const useCanvasStore = create<CanvasState>()(
       saveActiveAsNew: (name) =>
         set((s) => {
           const canvas = s.canvases.find((c) => c.id === s.activeId);
-          if (!canvas) return s;
+          if (!canvas || canvas.readOnly || isProtectedSystemWorkflow(canvas)) return s;
           const finalName = (name ?? '').trim();
           if (!finalName) return s;
           const savedId = uid('s');
+          const workflowRef = canvas.workflowRef
+            ? { ...canvas.workflowRef, workflowId: uid('w') }
+            : undefined;
           return {
             savedCanvases: [
               ...s.savedCanvases,
@@ -520,10 +930,14 @@ export const useCanvasStore = create<CanvasState>()(
                 nodes: canvas.nodes,
                 edges: canvas.edges,
                 savedAt: datetime(),
+                origin: canvas.origin,
+                workflowRef,
               },
             ],
             canvases: s.canvases.map((c) =>
-              c.id === canvas.id ? { ...c, name: finalName, savedId } : c,
+              c.id === canvas.id
+                ? { ...c, name: finalName, savedId, workflowRef }
+                : c,
             ),
           };
         }),
@@ -532,7 +946,7 @@ export const useCanvasStore = create<CanvasState>()(
       saveActive: (name) =>
         set((s) => {
           const canvas = s.canvases.find((c) => c.id === s.activeId);
-          if (!canvas) return s;
+          if (!canvas || canvas.readOnly) return s;
           if (
             canvas.savedId &&
             s.savedCanvases.some((sc) => sc.id === canvas.savedId)
@@ -545,6 +959,8 @@ export const useCanvasStore = create<CanvasState>()(
                       nodes: canvas.nodes,
                       edges: canvas.edges,
                       savedAt: datetime(),
+                      origin: canvas.origin,
+                      workflowRef: canvas.workflowRef,
                     }
                   : sc,
               ),
@@ -562,10 +978,14 @@ export const useCanvasStore = create<CanvasState>()(
                 nodes: canvas.nodes,
                 edges: canvas.edges,
                 savedAt: datetime(),
+                origin: canvas.origin,
+                workflowRef: canvas.workflowRef,
               },
             ],
             canvases: s.canvases.map((c) =>
-              c.id === canvas.id ? { ...c, name: finalName, savedId } : c,
+              c.id === canvas.id
+                ? { ...c, name: finalName, savedId, workflowRef: canvas.workflowRef }
+                : c,
             ),
           };
         }),
@@ -575,7 +995,7 @@ export const useCanvasStore = create<CanvasState>()(
       saveAndClose: (id, name) =>
         set((s) => {
           const canvas = s.canvases.find((c) => c.id === id);
-          if (!canvas) return s;
+          if (!canvas || canvas.readOnly) return s;
 
           let savedCanvases = s.savedCanvases;
           const alreadySaved =
@@ -589,6 +1009,8 @@ export const useCanvasStore = create<CanvasState>()(
                     nodes: canvas.nodes,
                     edges: canvas.edges,
                     savedAt: datetime(),
+                    origin: canvas.origin,
+                    workflowRef: canvas.workflowRef,
                   }
                 : sc,
             );
@@ -601,8 +1023,10 @@ export const useCanvasStore = create<CanvasState>()(
                 id: uid('s'),
                 name: finalName,
                 nodes: canvas.nodes,
-                edges: canvas.edges,
-                savedAt: datetime(),
+                  edges: canvas.edges,
+                  savedAt: datetime(),
+                  origin: canvas.origin,
+                  workflowRef: canvas.workflowRef,
               },
             ];
           }
@@ -642,6 +1066,9 @@ export const useCanvasStore = create<CanvasState>()(
             nodes: d.nodes,
             edges: d.edges,
             savedId: sc.id,
+            readOnly: sc.readOnly || sc.workflowRef?.systemWorkflow?.version === 2,
+            origin: sc.origin,
+            workflowRef: sc.workflowRef,
           };
           result = 'opened';
           return { canvases: [...s.canvases, tab], activeId: tab.id };
@@ -670,6 +1097,8 @@ export const useCanvasStore = create<CanvasState>()(
       // 删除已保存画布;若其对应 tab 正打开则一并关闭
       deleteSaved: (savedId) =>
         set((s) => {
+          const saved = s.savedCanvases.find((canvas) => canvas.id === savedId);
+          if (!saved || isProtectedSystemWorkflow(saved)) return s;
           const savedCanvases = s.savedCanvases.filter((x) => x.id !== savedId);
           const openTab = s.canvases.find((c) => c.savedId === savedId);
           if (!openTab) return { savedCanvases };
@@ -677,7 +1106,9 @@ export const useCanvasStore = create<CanvasState>()(
             return {
               savedCanvases,
               canvases: s.canvases.map((c) =>
-                c.id === openTab.id ? { ...c, savedId: undefined } : c,
+                c.id === openTab.id
+                  ? { ...c, savedId: undefined, workflowRef: undefined }
+                  : c,
               ),
             };
           }
@@ -697,6 +1128,8 @@ export const useCanvasStore = create<CanvasState>()(
         set((s) => {
           const finalName = name.trim();
           if (!finalName) return s;
+          const saved = s.savedCanvases.find((canvas) => canvas.id === savedId);
+          if (!saved || isLockedSystemWorkflow(saved)) return s;
           return {
             savedCanvases: s.savedCanvases.map((sc) =>
               sc.id === savedId ? { ...sc, name: finalName } : sc,
@@ -707,7 +1140,7 @@ export const useCanvasStore = create<CanvasState>()(
           };
         }),
 
-      createRun: (canvasId) => {
+      createRun: (canvasId, historyDescriptor) => {
         const runId = uid('r');
         const tabId = uid('c');
         let created = false;
@@ -715,11 +1148,17 @@ export const useCanvasStore = create<CanvasState>()(
           if (s.canvases.length >= MAX_CANVASES) return s;
           const canvas = s.canvases.find((c) => c.id === canvasId);
           if (!canvas) return s;
+          const history = createRunHistoryMetadata(
+            s.runHistory,
+            canvas.origin?.packageId ?? canvas.workflowRef?.packageId,
+            historyDescriptor,
+          );
           const { record, tab } = createRunningArtifacts(
             canvasId,
             canvas,
             runId,
             tabId,
+            history,
           );
           created = true;
           return {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import type { Canvas, AgentNodeData } from '../stores/canvasStore';
+import type { ProfessionalTaskOrigin } from '../features/professionalTasks/domain';
 import type { CollectedInput, NodeOutput } from './agentRunner/types';
 
 const modelCalls: Array<{ nodeId: string; modelId?: string | null }> = [];
@@ -60,6 +61,7 @@ vi.stubGlobal('localStorage', {
 let runCanvas: typeof import('./agentRunner').runCanvas;
 let RunAbortedError: typeof import('./agentRunner').RunAbortedError;
 let useCanvasStore: typeof import('../stores/canvasStore').useCanvasStore;
+let useProfessionalTaskStore: typeof import('../features/professionalTasks/professionalTaskStore').useProfessionalTaskStore;
 
 function agentNode(
   id: string,
@@ -86,9 +88,9 @@ function edge(source: string, target: string): Edge {
   return { id: `${source}-${target}`, source, target };
 }
 
-function setCanvas(nodes: Node[], edges: Edge[] = []) {
+function setCanvas(nodes: Node[], edges: Edge[] = [], origin?: ProfessionalTaskOrigin) {
   useCanvasStore.setState({
-    canvases: [{ id: 'canvas-1', name: '测试画布', nodes, edges }],
+    canvases: [{ id: 'canvas-1', name: '测试画布', nodes, edges, origin }],
     activeId: 'canvas-1',
     savedCanvases: [],
     runHistory: [],
@@ -110,6 +112,7 @@ beforeEach(async () => {
   vi.useRealTimers();
   ({ runCanvas, RunAbortedError } = await import('./agentRunner'));
   ({ useCanvasStore } = await import('../stores/canvasStore'));
+  ({ useProfessionalTaskStore } = await import('../features/professionalTasks/professionalTaskStore'));
   useCanvasStore.setState({
     canvases: [],
     activeId: '',
@@ -117,9 +120,80 @@ beforeEach(async () => {
     runHistory: [],
     history: {},
   });
+  useProfessionalTaskStore.setState({ tasks: {}, focusedTaskId: null });
 });
 
 describe('agent runner integration', () => {
+  it('rejects running a system workflow template without task context', async () => {
+    useCanvasStore.setState({
+      canvases: [{
+        id: 'canvas-1',
+        name: 'AI 起草 · 主流程',
+        nodes: [agentNode('writer')],
+        edges: [],
+        workflowRef: {
+          packageId: 'fictionist',
+          projectId: 'project-1',
+          workflowId: 'workflow-1',
+          systemWorkflow: { key: 'fictionist.chapter-draft', version: 1 },
+        },
+      }],
+      activeId: 'canvas-1',
+      savedCanvases: [],
+      runHistory: [],
+      history: {},
+    });
+
+    await expect(runCanvas('canvas-1')).rejects.toThrow('专业包内置工作流模板不能直接运行');
+    expect(useCanvasStore.getState().runHistory).toHaveLength(0);
+  });
+
+  it('returns stable output references and advances a professional task to review', async () => {
+    const origin = useProfessionalTaskStore.getState().createTask({
+      packageId: 'fictionist',
+      taskType: 'continue-chapter',
+      taskLabel: '续写下一章',
+      sourceLabel: '《测试作品》· 第一章',
+      sourceRefs: [{ type: 'fiction-chapter', id: 'chapter-1', revision: 1 }],
+      contextSnapshot: { title: '上下文', format: 'markdown', content: '来源正文' },
+      expectedResult: { role: 'fictionist.chapter-draft', outputFormat: 'txt' },
+      historyDescriptor: {
+        subjectType: 'fiction-chapter',
+        subjectId: 'chapter-2',
+        subjectLabel: '明日之后',
+        actionLabel: '续写',
+      },
+      packagePayload: {},
+    });
+    setCanvas([
+      agentNode('final', {
+        resultRole: 'fictionist.chapter-draft',
+        outputFormat: 'txt',
+      }),
+    ], [], origin);
+    modelReplies.push('这是唯一的章节草稿结论');
+
+    const result = await runCanvas('canvas-1');
+
+    expect(result).toMatchObject({ nodeCount: 1, runId: expect.any(String) });
+    expect(result.outputs).toEqual([
+      expect.objectContaining({
+        nodeId: 'final',
+        resultRole: 'fictionist.chapter-draft',
+        outputFormat: 'txt',
+        content: '这是唯一的章节草稿结论',
+      }),
+    ]);
+    expect(useProfessionalTaskStore.getState().tasks[origin.taskId]).toMatchObject({
+      status: 'review_required',
+      runId: result.runId,
+      runCanvasId: result.runCanvasId,
+    });
+    expect(useCanvasStore.getState().runHistory[0].origin).toEqual(origin);
+    expect(useCanvasStore.getState().runHistory[0].history?.displayName)
+      .toBe('明日之后-续写（1）');
+  });
+
   it('retries the primary model before switching to the fallback model', async () => {
     setCanvas([
       agentNode('n1', {

@@ -156,6 +156,8 @@ export function ensureDataSources(canvas: Canvas): void {
       hasManual =
         Array.isArray(data.dataSourceHistoryPaths) &&
         data.dataSourceHistoryPaths.length > 0;
+    } else if (mode === 'inline') {
+      hasManual = !!data.inlineDataSource?.content.trim();
     } else {
       hasManual =
         Array.isArray(data.dataSourceFiles) && data.dataSourceFiles.length > 0;
@@ -364,6 +366,11 @@ async function collectManualInput(
       sections.push(`## 历史产物：${path}\n${src.text}`);
       images.push(...src.images);
     }
+  } else if (data.dataSourceMode === 'inline') {
+    const source = data.inlineDataSource;
+    if (source?.content.trim()) {
+      sections.push(`## ${source.name.trim() || '内联上下文'}\n${source.content}`);
+    }
   } else {
     const files = Array.isArray(data.dataSourceFiles) ? data.dataSourceFiles : [];
     for (const file of files) {
@@ -435,6 +442,8 @@ export async function collectInput(
   const manual = await collectManualInput(data, signal);
   const emptyMessage = data.dataSourceMode === 'history'
     ? '当前节点选择了历史产物数据来源，但未选中任何历史文件。'
-    : '当前节点没有前序输入或手动数据源。';
+    : data.dataSourceMode === 'inline'
+      ? '当前节点的内联上下文为空。'
+      : '当前节点没有前序输入或手动数据源。';
   return applyConfiguredInputLength(node, manual ?? textInput(emptyMessage), signal);
 }

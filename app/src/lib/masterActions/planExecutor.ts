@@ -1,4 +1,4 @@
-import { runCanvas } from '../agentRunner';
+import { runCanvasWithSystemFallback } from '../../features/professionalTasks/systemWorkflowExecution';
 import { observeJiziProject } from '../jiziProjectObservation';
 import { useAgentStore } from '../../stores/agentStore';
 import { canvasLimitMessage, useCanvasStore } from '../../stores/canvasStore';
@@ -159,7 +159,7 @@ export async function executePlanAction(
         break;
       }
       case 'run-active-canvas':
-        await runCanvas(activeCanvasId(), signal);
+        await runCanvasWithSystemFallback(activeCanvasId(), signal);
         break;
     }
   };

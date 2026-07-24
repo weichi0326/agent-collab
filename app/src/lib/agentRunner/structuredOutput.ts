@@ -1,5 +1,5 @@
 import type { Node } from '@xyflow/react';
-import type { AgentOutputFormat, Canvas } from '../../stores/canvasStore';
+import type { AgentNodeData, AgentOutputFormat, Canvas } from '../../stores/canvasStore';
 import type { JsonObject } from './types';
 import { OUTPUT_SUMMARY_MAX_CHARS } from './constants';
 import { outputSpecForFormat } from './outputFormats';
@@ -120,6 +120,7 @@ export function buildStructuredEnvelope(params: {
       id: params.node.id,
       label: params.label,
       outputFormat: params.format,
+      resultRole: (params.node.data as AgentNodeData).resultRole,
     },
     runAt: params.runAt,
     summary: params.summary,
@@ -173,6 +174,8 @@ export function docxFallbackPayload(reply: string, label: string): JsonObject {
 
 export function expectedJsonShape(format: AgentOutputFormat): string {
   switch (format) {
+    case 'txt':
+      return '{"title":"标题","outputFormat":"txt","contentRef":{"kind":"artifact","path":"正文产物路径"}}';
     case 'docx':
       return '{"title":"文档标题","sections":[{"heading":"章节标题","paragraphs":["段落"],"table":{"headers":["列名"],"rows":[["单元格"]]}}]}';
     case 'xlsx':
@@ -242,7 +245,7 @@ export function validateStructuredSchema(
   format: AgentOutputFormat,
 ): string[] {
   const errors: string[] = [];
-  if (format === 'markdown') {
+  if (format === 'txt' || format === 'markdown') {
     if (!nonEmptyString(data.title)) errors.push('title 必须是非空字符串');
     const ref = data.contentRef;
     const refPath = ref && typeof ref === 'object' && !Array.isArray(ref)

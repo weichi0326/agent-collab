@@ -12,6 +12,18 @@ function agentNode(data: Record<string, unknown>): Node {
 }
 
 describe('buildPrompt custom output rule', () => {
+  it('asks txt nodes for plain text instead of markdown or JSON', () => {
+    const prompt = buildPrompt(agentNode({
+      outputFormat: 'txt',
+      outputSchemaText: '{"type":"object"}',
+    }), '小说章节要求');
+
+    expect(prompt).toContain('只输出纯文本正文');
+    expect(prompt).not.toContain('只输出合法 JSON');
+    expect(prompt).not.toContain('保存为 Markdown');
+    expect(prompt).not.toContain('JSON Schema');
+  });
+
   it('does not change the prompt while the rule is disabled', () => {
     const prompt = buildPrompt(
       agentNode({ outputRuleEnabled: false, outputRuleText: '第一列必须是编号' }),

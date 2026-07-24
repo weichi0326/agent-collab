@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
 }));
 
-import { clearProjectStorageData } from './tauriStorage';
+import { clearProjectStorageData, PROJECT_STORAGE_KEYS } from './tauriStorage';
 
 describe('clearProjectStorageData', () => {
   beforeEach(() => {
@@ -20,6 +20,16 @@ describe('clearProjectStorageData', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('clear_selected_app_data', {
       input: { itemIds: ['fictionist'] },
+    });
+  });
+
+  it('clears persisted workflow policies with the other project stores', async () => {
+    expect(PROJECT_STORAGE_KEYS).toContain('multi-agent-workflow-policies');
+
+    await clearProjectStorageData();
+
+    expect(invokeMock).toHaveBeenCalledWith('storage_remove', {
+      key: 'multi-agent-workflow-policies',
     });
   });
 });

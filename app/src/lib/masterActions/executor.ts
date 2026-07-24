@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import { uid } from '../id';
-import { runCanvas, rerunCanvasNode } from '../agentRunner';
+import { rerunCanvasNode } from '../agentRunner';
+import { runCanvasWithSystemFallback } from '../../features/professionalTasks/systemWorkflowExecution';
 import { useAgentStore } from '../../stores/agentStore';
 import { canvasLimitMessage, useCanvasStore } from '../../stores/canvasStore';
 import { useToolStore } from '../../stores/toolStore';
@@ -28,7 +29,7 @@ export async function executeMasterAction(
 
   if (action.type === 'run-active-canvas') {
     const id = activeCanvasId();
-    const result = await runCanvas(id, signal);
+    const result = await runCanvasWithSystemFallback(id, signal);
     return `当前画布运行完成：${result.nodeCount} 个节点，写出 ${result.writtenCount} 个文件。`;
   }
 

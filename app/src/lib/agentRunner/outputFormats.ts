@@ -13,6 +13,7 @@ export function outputFormatForNode(node: Node): AgentOutputFormat {
   if ((node.data as AgentNodeData).gateType) return 'markdown';
   const value = (node.data as AgentNodeData).outputFormat;
   if (
+    value === 'txt' ||
     value === 'docx' ||
     value === 'xlsx' ||
     value === 'mindmap' ||
@@ -25,6 +26,8 @@ export function outputFormatForNode(node: Node): AgentOutputFormat {
 
 export function outputSpecForFormat(format: AgentOutputFormat): OutputSpec {
   switch (format) {
+    case 'txt':
+      return { extension: 'txt', tool: 'file', title: '纯文本' };
     case 'docx':
       return { extension: 'docx', tool: 'docx', title: 'Word' };
     case 'xlsx':

@@ -28,7 +28,10 @@ import {
   type NodeOutput,
   type RunArtifact,
   type RunCanvasResult,
+  type RunOutputRef,
 } from './agentRunner/types';
+import { outputFormatForNode } from './agentRunner/outputFormats';
+import { useProfessionalTaskStore } from '../features/professionalTasks/professionalTaskStore';
 import {
   incomingSources,
   outgoingTargets,
@@ -226,14 +229,50 @@ export async function removeRunArtifacts(
   });
   if (!res.ok) throw new Error(res.error || '移除产物失败');
 
+  const origin = useCanvasStore.getState().canvases.find((canvas) => canvas.id === canvasId)?.origin;
   useCanvasStore.getState().markOutputItemsDeleted(canvasId, paths, runId);
+  if (origin) useProfessionalTaskStore.getState().invalidateOutputs(origin, paths);
 
   const result = res.result as { deleted?: unknown };
   return Array.isArray(result.deleted) ? result.deleted.length : paths.length;
 }
 
 export function runCanvas(canvasId: string, signal?: AbortSignal): Promise<RunCanvasResult> {
-  return withNativeTaskGuard(() => runCanvasInternal(canvasId, signal));
+  const origin = useCanvasStore.getState().canvases.find((canvas) => canvas.id === canvasId)?.origin;
+  return withNativeTaskGuard(async () => {
+    try {
+      return await runCanvasInternal(canvasId, signal);
+    } catch (reason) {
+      if (origin) {
+        const tasks = useProfessionalTaskStore.getState();
+        if (reason instanceof RunAbortedError || isAbortError(reason)) {
+          tasks.markRunInterrupted(origin);
+        } else {
+          tasks.markRunFailed(origin, errorMessage(reason));
+        }
+      }
+      throw reason;
+    }
+  });
+}
+
+function outputRefs(canvas: Canvas, outputs: NodeOutput[]): RunOutputRef[] {
+  const nodes = new Map(canvas.nodes.map((node) => [node.id, node]));
+  return outputs.flatMap((output) => {
+    if (!output.nodeId) return [];
+    const node = nodes.get(output.nodeId);
+    if (!node) return [];
+    return [{
+      nodeId: output.nodeId,
+      resultRole: output.resultRole ?? (node.data as AgentNodeData).resultRole,
+      outputFormat: outputFormatForNode(node),
+      label: output.label,
+      summary: output.summary,
+      path: output.path,
+      dataPath: output.dataPath,
+      content: output.content,
+    }];
+  });
 }
 
 async function runCanvasInternal(
@@ -243,6 +282,9 @@ async function runCanvasInternal(
   const canvasState = useCanvasStore.getState();
   const sourceCanvas = canvasState.canvases.find((c) => c.id === canvasId);
   if (!sourceCanvas) throw new Error('当前画布不存在。');
+  if (sourceCanvas.workflowRef?.systemWorkflow && !sourceCanvas.origin) {
+    throw new Error('专业包内置工作流模板不能直接运行，请从对应专业工作区发起任务。');
+  }
   if (sourceCanvas.readOnly) throw new Error('只读运行画布不可再次运行。');
   if (sourceCanvas.nodes.length === 0) throw new Error('画布为空，请先添加节点。');
   if (canvasState.canvases.length >= canvasState.maxCanvases) {
@@ -276,7 +318,13 @@ async function runCanvasInternal(
       });
       throw err;
     }
-    const run = useCanvasStore.getState().createRun(sourceCanvas.id);
+    const professionalTask = sourceCanvas.origin
+      ? useProfessionalTaskStore.getState().tasks[sourceCanvas.origin.taskId]
+      : undefined;
+    const run = useCanvasStore.getState().createRun(
+      sourceCanvas.id,
+      professionalTask?.historyDescriptor,
+    );
     if (!run) {
       const state = useCanvasStore.getState();
       if (state.canvases.length >= state.maxCanvases) {
@@ -289,13 +337,20 @@ async function runCanvasInternal(
       .getState()
       .canvases.find((c) => c.id === run.canvasId);
     if (!canvas) throw new Error('运行副本不存在。');
+    if (sourceCanvas.origin) {
+      useProfessionalTaskStore.getState().markRunStarted(
+        sourceCanvas.origin,
+        run.runId,
+        run.canvasId,
+      );
+    }
 
     const order = topoSort(canvas.nodes, canvas.edges);
     const incoming = incomingSources(canvas.edges);
     const outgoing = outgoingTargets(canvas.edges);
     const byId = new Map(order.map((node) => [node.id, node]));
 
-    const { writtenCount } = await runGraph({
+    const { writtenCount, outputs } = await runGraph({
       canvas,
       runId: run.runId,
       sourceCanvasId: canvasId,
@@ -309,7 +364,17 @@ async function runCanvasInternal(
       slotHolder,
       signal,
     });
-    return { nodeCount: order.length, writtenCount };
+    const result: RunCanvasResult = {
+      runId: run.runId,
+      runCanvasId: run.canvasId,
+      nodeCount: order.length,
+      writtenCount,
+      outputs: outputRefs(canvas, outputs),
+    };
+    if (sourceCanvas.origin) {
+      useProfessionalTaskStore.getState().markRunSucceeded(sourceCanvas.origin, result.outputs);
+    }
+    return result;
   } finally {
     if (slotHolder.held) runSlots.release();
   }
@@ -346,7 +411,7 @@ async function runGraph({
   runStartedAt,
   slotHolder,
   signal,
-}: RunGraphParams): Promise<{ writtenCount: number }> {
+}: RunGraphParams): Promise<{ writtenCount: number; outputs: NodeOutput[] }> {
   const artifacts: RunArtifact[] = [];
   let writtenCount = 0;
   let completed = 0;
@@ -773,7 +838,7 @@ async function runGraph({
     skipped,
   });
   useCanvasStore.getState().syncRunSnapshot(runId, canvas.id);
-  return { writtenCount };
+  return { writtenCount, outputs: [...outputs.values()] };
 }
 
 // 就地重跑「失败节点 + 其下游」: 在既有只读运行副本 tab 上,把已成功上游节点的输出
@@ -785,9 +850,22 @@ export function rerunCanvasNode(
   sourceCanvasId: string,
   signal?: AbortSignal,
 ): Promise<RunCanvasResult> {
-  return withNativeTaskGuard(() =>
-    rerunCanvasNodeInternal(runTabId, nodeId, sourceCanvasId, signal),
-  );
+  const origin = useCanvasStore.getState().canvases.find((canvas) => canvas.id === runTabId)?.origin;
+  return withNativeTaskGuard(async () => {
+    try {
+      return await rerunCanvasNodeInternal(runTabId, nodeId, sourceCanvasId, signal);
+    } catch (reason) {
+      if (origin) {
+        const tasks = useProfessionalTaskStore.getState();
+        if (reason instanceof RunAbortedError || isAbortError(reason)) {
+          tasks.markRunInterrupted(origin);
+        } else {
+          tasks.markRunFailed(origin, errorMessage(reason));
+        }
+      }
+      throw reason;
+    }
+  });
 }
 
 async function rerunCanvasNodeInternal(
@@ -805,6 +883,9 @@ async function rerunCanvasNodeInternal(
     throw new RerunUnavailableError('运行副本已不存在，无法就地重跑。');
   }
   const runId = canvas.runId;
+  if (canvas.origin) {
+    useProfessionalTaskStore.getState().markRunStarted(canvas.origin, runId, runTabId);
+  }
   if (!canvas.nodes.some((n) => n.id === nodeId)) {
     throw new RerunUnavailableError('运行副本上找不到目标节点，无法就地重跑。');
   }
@@ -871,7 +952,7 @@ async function rerunCanvasNodeInternal(
   await runSlots.waitAndReserve(signal);
   const slotHolder: RunSlotHolder = { held: true };
   try {
-    const { writtenCount } = await runGraph({
+    const { writtenCount, outputs: completedOutputs } = await runGraph({
       canvas,
       runId,
       sourceCanvasId,
@@ -885,7 +966,17 @@ async function rerunCanvasNodeInternal(
       slotHolder,
       signal,
     });
-    return { nodeCount: order.length, writtenCount };
+    const result: RunCanvasResult = {
+      runId,
+      runCanvasId: runTabId,
+      nodeCount: order.length,
+      writtenCount,
+      outputs: outputRefs(canvas, completedOutputs),
+    };
+    if (canvas.origin) {
+      useProfessionalTaskStore.getState().markRunSucceeded(canvas.origin, result.outputs);
+    }
+    return result;
   } finally {
     if (slotHolder.held) runSlots.release();
   }
@@ -953,7 +1044,7 @@ async function restoreNodeOutput(
   } catch {
     throw new RerunUnavailableError(`上游产物 data.json 解析失败：${dataPath}`);
   }
-  const nodeMeta = envelope.node as { label?: unknown } | undefined;
+  const nodeMeta = envelope.node as { label?: unknown; resultRole?: unknown } | undefined;
   const label =
     typeof nodeMeta?.label === 'string' ? nodeMeta.label : nodeLabel(node);
   const structuredData =
@@ -972,5 +1063,6 @@ async function restoreNodeOutput(
     structuredData,
     summary: typeof envelope.summary === 'string' ? envelope.summary : undefined,
     nodeId: node.id,
+    resultRole: typeof nodeMeta?.resultRole === 'string' ? nodeMeta.resultRole : undefined,
   };
 }

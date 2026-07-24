@@ -18,6 +18,18 @@ export interface NodeOutput {
   path?: string;
   dataPath?: string;
   nodeId?: string;
+  resultRole?: string;
+}
+
+export interface RunOutputRef {
+  nodeId: string;
+  resultRole?: string;
+  outputFormat: string;
+  label: string;
+  summary?: string;
+  path?: string;
+  dataPath?: string;
+  content: string;
 }
 
 export interface OutputSpec {
@@ -27,8 +39,11 @@ export interface OutputSpec {
 }
 
 export interface RunCanvasResult {
+  runId: string;
+  runCanvasId: string;
   nodeCount: number;
   writtenCount: number;
+  outputs: RunOutputRef[];
 }
 
 export interface RunArtifact {

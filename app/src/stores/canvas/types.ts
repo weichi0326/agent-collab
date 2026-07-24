@@ -1,4 +1,8 @@
 import type { Edge, Node } from '@xyflow/react';
+import type {
+  ProfessionalTaskHistoryDescriptor,
+  ProfessionalTaskOrigin,
+} from '../../features/professionalTasks/domain';
 
 export type AgentRunStatus =
   | 'idle'
@@ -34,7 +38,39 @@ export interface CanvasRunState {
   skipped?: number;
 }
 
-export type AgentOutputFormat = 'markdown' | 'docx' | 'xlsx' | 'mindmap';
+/**
+ * A saved canvas that belongs to a professional package workspace.
+ * This is deliberately separate from ProfessionalTaskOrigin: reusable
+ * workflows are not execution tasks and must not enter the task lifecycle.
+ */
+export interface CanvasWorkflowRef {
+  packageId: string;
+  /**
+   * Legacy project-only workflows keep this value. Package workflows omit it
+   * and can be reused by every project opened by the professional package.
+   */
+  projectId?: string;
+  workflowId: string;
+  /**
+   * Optional metadata for package-provided workflows. Keeping this optional
+   * preserves compatibility with user-created and legacy workflow records.
+   */
+  systemWorkflow?: {
+    key: string;
+    version: 1 | 2;
+    templateRevision?: number;
+  };
+  /** The system workflow used to create a one-off professional task canvas. */
+  sourceWorkflow?: {
+    key: string;
+    version: 1 | 2;
+    workflowId?: string;
+    contentSignature?: string;
+    fallbackEnabled?: boolean;
+  };
+}
+
+export type AgentOutputFormat = 'txt' | 'markdown' | 'docx' | 'xlsx' | 'mindmap';
 
 export interface NodeInputCapability {
   enabled?: boolean;
@@ -84,21 +120,25 @@ export interface AgentNodeData {
   collapsible?: boolean;
   hiddenCount?: number;
   agentId?: string;
+  professionalAgentId?: string;
+  professionalPackageId?: string;
   description?: string;
   systemPrompt?: string;
   systemPromptSourceName?: string;
   outputRuleEnabled?: boolean;
   outputRuleText?: string;
   outputRuleSourceName?: string;
+  resultRole?: string;
   capabilities?: AgentNodeCapabilities;
   toolTags?: string[];
   modelRef?: { configId: string; modelId: string } | null;
   inputSchemaText?: string;
   outputSchemaText?: string;
-  dataSourceMode?: 'file' | 'url' | 'history';
+  dataSourceMode?: 'file' | 'url' | 'history' | 'inline';
   dataSourceFiles?: string[];
   dataSourceUrl?: string;
   dataSourceHistoryPaths?: string[];
+  inlineDataSource?: { name: string; content: string };
   outputPath?: string;
   outputFormat?: AgentOutputFormat;
   lastOutput?: {
@@ -128,6 +168,8 @@ export interface Canvas {
   runId?: string;
   lockClose?: boolean;
   runState?: CanvasRunState;
+  origin?: ProfessionalTaskOrigin;
+  workflowRef?: CanvasWorkflowRef;
   // 右上角运行状态卡是否被用户收起(仅终态可收起);收起后显示为可点击的小色标胶囊。
   runCardCollapsed?: boolean;
 }
@@ -138,6 +180,9 @@ export interface SavedCanvas {
   nodes: Node[];
   edges: Edge[];
   savedAt: string;
+  readOnly?: boolean;
+  origin?: ProfessionalTaskOrigin;
+  workflowRef?: CanvasWorkflowRef;
 }
 
 export interface RunRecord {
@@ -149,11 +194,29 @@ export interface RunRecord {
   nodes: Node[];
   edges: Edge[];
   runState?: CanvasRunState;
+  history?: ProfessionalTaskHistoryDescriptor & {
+    packageId?: string;
+    sequence: number;
+    displayName: string;
+  };
+  origin?: ProfessionalTaskOrigin;
+  workflowRef?: CanvasWorkflowRef;
 }
 
 export interface CreatedRun {
   runId: string;
   canvasId: string;
+}
+
+export interface CreatedWorkflowCanvas {
+  canvasId: string;
+  savedId: string;
+  workflowId: string;
+}
+
+export interface CreatedSavedWorkflowCanvas {
+  savedId: string;
+  workflowId: string;
 }
 
 export type CanvasOpenResult = 'opened' | 'activated' | 'limit' | 'not-found';

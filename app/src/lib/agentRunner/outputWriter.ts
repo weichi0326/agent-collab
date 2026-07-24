@@ -105,7 +105,7 @@ function assertOutputSize(text: string, label: string, kind: string): void {
 }
 
 // 从结构化产物或 markdown H1 提取内容概括作为产物文件名; 提取不到回退到节点 label。
-// docx/mindmap 用 title, xlsx 用 sheet, markdown 用首个 H1, 其余回退 label。
+// docx/mindmap 用 title, xlsx 用 sheet, markdown 用首个 H1, txt 和其余格式回退 label。
 function deriveFileSubject(
   content: string,
   label: string,
@@ -141,7 +141,9 @@ export async function persistOutput(
   const label = nodeLabel(node);
   const format = outputFormatForNode(node);
   const spec = outputSpecForFormat(format);
-  const outputSchema = parseSchemaText(schemaTextFromNode(node, 'outputSchemaText'), label);
+  const outputSchema = format === 'txt'
+    ? undefined
+    : parseSchemaText(schemaTextFromNode(node, 'outputSchemaText'), label);
   const folderName = outputFolderName(
     canvas.name,
     outputFolderLabelForNode(canvas, node, label, format),
@@ -155,7 +157,7 @@ export async function persistOutput(
   let structuredOutput: JsonObject | undefined;
   let res: ToolResult;
 
-  if (format === 'markdown') {
+  if (format === 'txt' || format === 'markdown') {
     if (outputSchema) {
       structuredOutput = parseJsonReply(content, label, format);
       assertCustomSchema(structuredOutput, outputSchema, label, '输出');
@@ -163,14 +165,14 @@ export async function persistOutput(
     }
     fileName = `${safeFileName(deriveFileSubject(content, label, format, structuredOutput))}.${spec.extension}`;
     path = joinPath(outputRoot, folderName, fileName);
-    const markdownBody = `# ${label}\n\n${outputContent}\n`;
-    assertOutputSize(markdownBody, label, `${spec.title} 产物`);
+    const textBody = format === 'markdown' ? `# ${label}\n\n${outputContent}\n` : outputContent;
+    assertOutputSize(textBody, label, `${spec.title} 产物`);
     res = await executeTool(
       'file',
       {
         action: 'write',
         path,
-        content: markdownBody,
+        content: textBody,
         mode: 'overwrite',
         mkdir: true,
         atomic: true,
@@ -254,7 +256,7 @@ export async function persistOutput(
   const summary = buildOutputSummary(outputContent, label, format, structuredOutput);
   const structuredData = structuredOutputForFormat(label, format, structuredOutput, path);
   assertCustomSchema(structuredData, outputSchema, label, '输出');
-  if (!(format === 'markdown' && outputSchema)) {
+  if (!((format === 'txt' || format === 'markdown') && outputSchema)) {
     assertStructuredSchema(structuredData, label, format);
   }
   const dataFileName = 'data.json';
@@ -312,5 +314,6 @@ export async function persistOutput(
     path,
     dataPath,
     nodeId: node.id,
+    resultRole: (node.data as AgentNodeData).resultRole,
   };
 }

@@ -19,6 +19,8 @@ export const PROJECT_STORAGE_KEYS = [
   'multi-agent-orchestrator',
   'multi-agent-jizi-skills',
   'multi-agent-onboarding',
+  'multi-agent-professional-tasks',
+  'multi-agent-workflow-policies',
 ] as const;
 
 export async function clearProjectStorageData(): Promise<void> {

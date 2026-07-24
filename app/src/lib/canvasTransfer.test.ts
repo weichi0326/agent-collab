@@ -3,6 +3,23 @@ import { buildCanvasExport, parseCanvasImport } from './canvasTransfer';
 import type { AgentNodeData } from '../stores/canvasStore';
 
 describe('canvas prompt metadata transfer', () => {
+  it('preserves the plain text output format through export and import', () => {
+    const envelope = buildCanvasExport({
+      name: '小说画布',
+      nodes: [{
+        id: 'writer',
+        type: 'agent',
+        position: { x: 0, y: 0 },
+        data: { label: '章节作者', outputFormat: 'txt' },
+      }],
+      edges: [],
+    });
+
+    const result = parseCanvasImport(JSON.stringify(envelope), []);
+
+    expect(result.nodes[0].data.outputFormat).toBe('txt');
+  });
+
   it('preserves the node prompt source filename through export and import', () => {
     const envelope = buildCanvasExport({
       name: '测试画布',

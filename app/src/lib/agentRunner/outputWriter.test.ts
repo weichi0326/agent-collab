@@ -51,10 +51,32 @@ beforeEach(() => {
 });
 
 describe('persistOutput referenced envelope', () => {
+  it('writes plain text without adding markdown syntax', async () => {
+    const reply = '雨水敲打着阁楼窗户。\n\n匿名来信从门缝滑了进来。';
+
+    const output = await persistOutput(canvas(), node({
+      outputFormat: 'txt',
+      outputSchemaText: '{"type":"object","required":["title"]}',
+    }), reply);
+
+    expect(output.path).toMatch(/\.txt$/u);
+    expect(output.content).toBe(reply);
+    expect(writes.get(output.path!)).toBe(reply);
+    expect(output.structuredData).toMatchObject({
+      title: '剧情规划',
+      outputFormat: 'txt',
+      contentRef: { kind: 'artifact', path: output.path },
+    });
+  });
+
   it('stores markdown body only in the user artifact and references it from data.json', async () => {
     const reply = '# 剧情规划\n\n第一幕：主角收到旧信。\n第二幕：城市记忆被改写。';
 
-    const output = await persistOutput(canvas(), node(), reply);
+    const output = await persistOutput(
+      canvas(),
+      node({ resultRole: 'fictionist.chapter-draft' }),
+      reply,
+    );
 
     expect(output.content).toBe(reply);
     expect(output.structuredData).toMatchObject({
@@ -70,9 +92,11 @@ describe('persistOutput referenced envelope', () => {
     expect(envelope).toMatchObject({
       version: '2.0',
       kind: 'agent-node-output',
+      node: { resultRole: 'fictionist.chapter-draft' },
       artifact: { path: output.path },
       data: { contentRef: { kind: 'artifact', path: output.path } },
     });
+    expect(output.resultRole).toBe('fictionist.chapter-draft');
     expect(envelope.rawReply).toBeUndefined();
     expect(envelope.data.text).toBeUndefined();
     expect(envelope.data.paragraphs).toBeUndefined();

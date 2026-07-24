@@ -25,7 +25,7 @@ export const CANVAS_EXPORT_SCHEMA = 1;
 const IMPORT_MAX_NODES = 500;
 const IMPORT_MAX_NAME_LEN = 40; // 与重命名弹窗 maxLength 对齐
 
-const OUTPUT_FORMATS: readonly AgentOutputFormat[] = ['markdown', 'docx', 'xlsx', 'mindmap'];
+const OUTPUT_FORMATS: readonly AgentOutputFormat[] = ['txt', 'markdown', 'docx', 'xlsx', 'mindmap'];
 function normalizeOutputFormat(v: unknown): AgentOutputFormat | undefined {
   return OUTPUT_FORMATS.includes(v as AgentOutputFormat) ? (v as AgentOutputFormat) : undefined;
 }

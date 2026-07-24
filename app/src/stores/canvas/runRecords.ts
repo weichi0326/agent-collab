@@ -2,6 +2,7 @@ import type { Edge, Node } from '@xyflow/react';
 import { uid } from '../../lib/id';
 import { datetime, stamp } from '../../lib/time';
 import { recomputeDerived } from './derived';
+import type { ProfessionalTaskHistoryDescriptor } from '../../features/professionalTasks/domain';
 import type {
   AgentNodeData,
   Canvas,
@@ -28,11 +29,47 @@ export function cloneEdges(edges: Edge[]): Edge[] {
   return edges.map((e) => ({ ...e }));
 }
 
+export function createRunHistoryMetadata(
+  records: RunRecord[],
+  packageId: string | undefined,
+  descriptor?: ProfessionalTaskHistoryDescriptor,
+): RunRecord['history'] | undefined {
+  const subjectLabel = descriptor?.subjectLabel.trim();
+  const actionLabel = descriptor?.actionLabel.trim();
+  if (!descriptor || !subjectLabel || !actionLabel) return undefined;
+
+  const sameSubject = (record: RunRecord): boolean => {
+    const history = record.history;
+    if (!history || history.packageId !== packageId) return false;
+    if (history.subjectType !== descriptor.subjectType
+      || history.actionLabel !== actionLabel) return false;
+    return descriptor.subjectId
+      ? history.subjectId === descriptor.subjectId
+      : !history.subjectId && history.subjectLabel === subjectLabel;
+  };
+  const sequence = records.reduce(
+    (highest, record) => sameSubject(record)
+      ? Math.max(highest, record.history?.sequence ?? 0)
+      : highest,
+    0,
+  ) + 1;
+
+  return {
+    ...descriptor,
+    subjectLabel,
+    actionLabel,
+    packageId,
+    sequence,
+    displayName: `${subjectLabel}-${actionLabel}（${sequence}）`,
+  };
+}
+
 export function createRunningArtifacts(
   canvasId: string,
   canvas: Canvas,
   runId: string,
   tabId: string,
+  history?: RunRecord['history'],
 ): { record: RunRecord; tab: Canvas } {
   const time = datetime();
   const compact = stamp();
@@ -65,16 +102,21 @@ export function createRunningArtifacts(
     nodes: cloneRunNodes(d.nodes),
     edges: cloneEdges(d.edges),
     runState,
+    history,
+    origin: canvas.origin,
+    workflowRef: canvas.workflowRef,
   };
   const tab: Canvas = {
     id: tabId,
-    name: `${record.canvasName}_${record.stamp}`,
+    name: record.history?.displayName ?? `${record.canvasName}_${record.stamp}`,
     nodes: d.nodes,
     edges: d.edges,
     readOnly: true,
     runId,
     lockClose: true,
     runState,
+    origin: canvas.origin,
+    workflowRef: canvas.workflowRef,
   };
   return { record, tab };
 }
@@ -95,13 +137,15 @@ export function createRunSnapshotTab(
   const d = expandedRunGraph(nodes, record.edges);
   return {
     id: uid('c'),
-    name: `${record.canvasName}_${record.stamp}`,
+    name: record.history?.displayName ?? `${record.canvasName}_${record.stamp}`,
     nodes: d.nodes,
     edges: d.edges,
     readOnly: true,
     runId: record.id,
     lockClose: runState?.status === 'running',
     runState,
+    origin: record.origin,
+    workflowRef: record.workflowRef,
   };
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { AgentNodeData, Canvas } from '../../stores/canvasStore';
-import { collectInput, requiredToolTagsForNode } from './inputs';
+import { collectInput, ensureDataSources, requiredToolTagsForNode } from './inputs';
 import type { NodeOutput } from './types';
 
 function node(data: AgentNodeData): Node {
@@ -101,6 +101,25 @@ describe('collectInput capability modes', () => {
       dataSourceMode: 'url',
       dataSourceUrl: 'https://example.com',
     }), [], outputs)).rejects.toThrow('暂未支持');
+  });
+
+  it('accepts and reads an immutable inline context source', async () => {
+    const target = node({
+      dataSourceMode: 'inline',
+      inlineDataSource: { name: '任务快照', content: '固定的来源章节正文' },
+    });
+    const canvas: Canvas = {
+      id: 'canvas',
+      name: 'canvas',
+      nodes: [target],
+      edges: [],
+    };
+
+    expect(() => ensureDataSources(canvas)).not.toThrow();
+    await expect(collectInput(target, [], outputs)).resolves.toMatchObject({
+      text: expect.stringContaining('固定的来源章节正文'),
+    });
+    expect(requiredToolTagsForNode(canvas, target)).toEqual(['file']);
   });
 });
 

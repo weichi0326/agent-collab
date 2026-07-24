@@ -36,6 +36,8 @@ export function describeMasterAction(action: MasterAction): string {
 
 function outputFormatLabel(format?: AgentOutputFormat): string {
   switch (format) {
+    case 'txt':
+      return '纯文本';
     case 'docx':
       return 'Word';
     case 'xlsx':
