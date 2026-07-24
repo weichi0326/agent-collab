@@ -313,12 +313,6 @@ const PACKAGE_SECTION_ITEMS: Array<{
   { label: '工作流中心', value: 'workflows', icon: <BranchesOutlined /> },
 ];
 
-function statusClass(status: FictionChapterStatus): string {
-  if (status === 'final') return 'is-final';
-  if (status === 'revised') return 'is-editing';
-  return 'is-draft';
-}
-
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -2945,9 +2939,27 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                             <strong>{chapter.title}</strong>
                             <small>{chapter.wordCount.toLocaleString()} 字</small>
                           </span>
-                          <span className={`fictionist-status-dot ${statusClass(chapter.status)}`} title={CHAPTER_STATUS_LABELS[chapter.status]} />
                         </button>
                         <span className="fictionist-chapter-actions">
+                          <Tooltip title="重命名章节">
+                            <Button
+                              type="text"
+                              size="small"
+                              aria-label={`重命名《${chapter.title}》`}
+                              icon={<EditOutlined />}
+                              onClick={() => openRenameChapter(chapter.id)}
+                            />
+                          </Tooltip>
+                          <Tooltip title="删除章节">
+                            <Button
+                              danger
+                              type="text"
+                              size="small"
+                              aria-label={`删除《${chapter.title}》`}
+                              icon={<DeleteOutlined />}
+                              onClick={() => confirmDeleteChapter(chapter.id)}
+                            />
+                          </Tooltip>
                           <Dropdown
                             trigger={['click']}
                             menu={{
@@ -2976,14 +2988,10 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                                       label: target.title,
                                     })),
                                 },
-                                { key: 'rename', label: '重命名章节', icon: <EditOutlined /> },
-                                { key: 'delete', label: '删除章节', icon: <DeleteOutlined />, danger: true },
                               ],
                               onClick: ({ key }) => {
                                 if (key === 'up') void moveChapter(chapter.id, volume.id, chapterIndex - 1);
                                 else if (key === 'down') void moveChapter(chapter.id, volume.id, chapterIndex + 1);
-                                else if (key === 'rename') openRenameChapter(chapter.id);
-                                else if (key === 'delete') confirmDeleteChapter(chapter.id);
                                 else if (key.startsWith('move:')) {
                                   const targetId = key.slice('move:'.length);
                                   const target = index.volumes[targetId];

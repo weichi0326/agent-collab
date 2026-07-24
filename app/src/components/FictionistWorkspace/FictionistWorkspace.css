@@ -316,7 +316,7 @@
   width: 100%;
   min-height: 54px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
+  grid-template-columns: minmax(0, 1fr) 80px;
   align-items: center;
   gap: 2px;
   border: 1px solid transparent;
@@ -339,7 +339,7 @@
   min-width: 0;
   min-height: 52px;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 8px;
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 7px 4px 7px 9px;
@@ -350,7 +350,10 @@
   cursor: pointer;
 }
 
-.fictionist-chapter-actions { opacity: 0.48; }
+.fictionist-chapter-actions {
+  justify-content: flex-end;
+  opacity: 0.48;
+}
 .fictionist-chapter-row:hover .fictionist-chapter-actions,
 .fictionist-chapter-row.is-active .fictionist-chapter-actions,
 .fictionist-chapter-actions:focus-within { opacity: 1; }
@@ -379,17 +382,6 @@
   color: var(--fiction-muted);
   font-size: 10px;
 }
-
-.fictionist-status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #9da5a1;
-}
-
-.fictionist-status-dot.is-final { background: var(--fiction-teal); }
-.fictionist-status-dot.is-editing { background: var(--fiction-gold); }
-.fictionist-status-dot.is-draft { background: #9ba3a0; }
 
 .fictionist-tree-empty {
   padding: 24px 10px;
