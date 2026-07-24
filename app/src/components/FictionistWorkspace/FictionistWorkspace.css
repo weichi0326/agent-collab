@@ -316,7 +316,7 @@
   width: 100%;
   min-height: 54px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 52px;
+  grid-template-columns: minmax(0, 1fr) 32px;
   align-items: center;
   gap: 2px;
   border: 1px solid transparent;

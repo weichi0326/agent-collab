@@ -90,8 +90,10 @@ describe('fictionist workspace mock', () => {
     expect(html).toContain('第一卷 · 潮汐失语');
     expect(html).toContain('在“第一卷 · 潮汐失语”中新建章节');
     expect(html).toContain('管理“第一卷 · 潮汐失语”');
-    expect(html).toContain('重命名《七号泊位》');
-    expect(html).toContain('删除《七号泊位》');
+    expect(html).toContain('管理《七号泊位》');
+    expect(workspaceSource).toContain("{ key: 'rename', label: '重命名章节'");
+    expect(workspaceSource).toContain("{ key: 'delete', label: '删除章节'");
+    expect(workspaceSource).toContain("else if (key === 'delete') confirmDeleteChapter(chapter.id)");
     expect(workspaceSource).toContain("createStoredChapter(targetVolumeId)");
     expect(workspaceSource).toContain('reorderVolume(volumeId, targetIndex)');
     expect(workspaceSource).toContain('moveStoredChapter(chapterId, targetVolumeId, targetIndex)');

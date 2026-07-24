@@ -2948,70 +2948,57 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                           <span className={`fictionist-status-dot ${statusClass(chapter.status)}`} title={CHAPTER_STATUS_LABELS[chapter.status]} />
                         </button>
                         <span className="fictionist-chapter-actions">
-                          <Tooltip title="上移章节">
-                            <Button
-                              type="text"
-                              size="small"
-                              disabled={chapterIndex === 0}
-                              aria-label={`上移《${chapter.title}》`}
-                              icon={<ArrowUpOutlined />}
-                              onClick={() => void moveChapter(chapter.id, volume.id, chapterIndex - 1)}
-                            />
-                          </Tooltip>
-                          <Tooltip title="下移章节">
-                            <Button
-                              type="text"
-                              size="small"
-                              disabled={chapterIndex === volume.chapterIds.length - 1}
-                              aria-label={`下移《${chapter.title}》`}
-                              icon={<ArrowDownOutlined />}
-                              onClick={() => void moveChapter(chapter.id, volume.id, chapterIndex + 1)}
-                            />
-                          </Tooltip>
-                          {activeVolumes.length > 1 ? (
-                            <Dropdown
-                              trigger={['click']}
-                              menu={{
-                                items: activeVolumes
-                                  .filter((target) => target.id !== volume.id)
-                                  .map((target) => ({
-                                    key: target.id,
-                                    label: target.title,
-                                    icon: <FolderOutlined />,
-                                  })),
-                                onClick: ({ key }) => {
-                                  const target = index.volumes[key];
-                                  if (target) void moveChapter(chapter.id, key, target.chapterIds.length);
+                          <Dropdown
+                            trigger={['click']}
+                            menu={{
+                              items: [
+                                {
+                                  key: 'up',
+                                  label: '上移章节',
+                                  icon: <ArrowUpOutlined />,
+                                  disabled: chapterIndex === 0,
                                 },
-                              }}
-                            >
-                              <Button
-                                type="text"
-                                size="small"
-                                aria-label={`移动《${chapter.title}》到其他卷`}
-                                icon={<SwapOutlined />}
-                              />
-                            </Dropdown>
-                          ) : null}
-                          <Tooltip title="重命名章节">
+                                {
+                                  key: 'down',
+                                  label: '下移章节',
+                                  icon: <ArrowDownOutlined />,
+                                  disabled: chapterIndex === volume.chapterIds.length - 1,
+                                },
+                                {
+                                  key: 'move',
+                                  label: '移动到其他卷',
+                                  icon: <SwapOutlined />,
+                                  disabled: activeVolumes.length <= 1,
+                                  children: activeVolumes
+                                    .filter((target) => target.id !== volume.id)
+                                    .map((target) => ({
+                                      key: `move:${target.id}`,
+                                      label: target.title,
+                                    })),
+                                },
+                                { key: 'rename', label: '重命名章节', icon: <EditOutlined /> },
+                                { key: 'delete', label: '删除章节', icon: <DeleteOutlined />, danger: true },
+                              ],
+                              onClick: ({ key }) => {
+                                if (key === 'up') void moveChapter(chapter.id, volume.id, chapterIndex - 1);
+                                else if (key === 'down') void moveChapter(chapter.id, volume.id, chapterIndex + 1);
+                                else if (key === 'rename') openRenameChapter(chapter.id);
+                                else if (key === 'delete') confirmDeleteChapter(chapter.id);
+                                else if (key.startsWith('move:')) {
+                                  const targetId = key.slice('move:'.length);
+                                  const target = index.volumes[targetId];
+                                  if (target) void moveChapter(chapter.id, targetId, target.chapterIds.length);
+                                }
+                              },
+                            }}
+                          >
                             <Button
                               type="text"
                               size="small"
-                              aria-label={`重命名《${chapter.title}》`}
-                              icon={<EditOutlined />}
-                              onClick={() => openRenameChapter(chapter.id)}
+                              aria-label={`管理《${chapter.title}》`}
+                              icon={<MoreOutlined />}
                             />
-                          </Tooltip>
-                          <Tooltip title="删除章节">
-                            <Button
-                              danger
-                              type="text"
-                              size="small"
-                              aria-label={`删除《${chapter.title}》`}
-                              icon={<DeleteOutlined />}
-                              onClick={() => confirmDeleteChapter(chapter.id)}
-                            />
-                          </Tooltip>
+                          </Dropdown>
                         </span>
                       </div>
                       );
