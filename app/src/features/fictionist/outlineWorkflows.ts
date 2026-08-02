@@ -4,6 +4,7 @@ import type { ModelRef } from '../../lib/modelRef';
 import type { AgentNodeData } from '../../stores/canvasStore';
 import { professionalAgentNodeData } from '../professionalPackages/domain';
 import { FICTIONIST_AGENT_IDS, findFictionistAgent } from './agents';
+import { createOutlineNodeId } from './outlineStructure';
 import {
   MAX_OUTLINE_DETAILS_CHARS,
   MAX_OUTLINE_FIELD_CHARS,
@@ -51,10 +52,23 @@ export interface FictionOutlineTaskPayload {
   intensity?: FictionOutlineOptimizationIntensity;
 }
 
+export interface FictionOutlineWorkflowVolumeResult extends FictionVolumeOutline {
+  id: string;
+  title?: string;
+  isNew?: boolean;
+}
+
+export interface FictionOutlineWorkflowChapterResult extends FictionChapterOutline {
+  id: string;
+  title?: string;
+  volumeId?: string;
+  isNew?: boolean;
+}
+
 export interface FictionOutlineWorkflowResult {
   story: FictionStoryOutline | null;
-  volumes: Array<FictionVolumeOutline & { id: string }>;
-  chapters: Array<FictionChapterOutline & { id: string }>;
+  volumes: FictionOutlineWorkflowVolumeResult[];
+  chapters: FictionOutlineWorkflowChapterResult[];
   changeSummary: string[];
 }
 
@@ -82,34 +96,64 @@ function stringProperties(keys: readonly string[]): Record<string, { type: 'stri
   return Object.fromEntries(keys.map((key) => [key, { type: 'string' as const }]));
 }
 
-export const OUTLINE_RESULT_SCHEMA_TEXT = JSON.stringify({
-  type: 'object',
-  required: ['story', 'volumes', 'chapters', 'changeSummary'],
-  properties: {
-    story: {
-      type: ['object', 'null'],
-      required: STORY_KEYS,
-      properties: stringProperties(STORY_KEYS),
-    },
-    volumes: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['id', ...VOLUME_KEYS],
-        properties: { id: { type: 'string' }, ...stringProperties(VOLUME_KEYS) },
+export function outlineResultSchemaText(operation: FictionOutlineTaskOperation): string {
+  const importing = operation === 'import';
+  return JSON.stringify({
+    type: 'object',
+    required: ['story', 'volumes', 'chapters', 'changeSummary'],
+    properties: {
+      story: {
+        type: ['object', 'null'],
+        required: STORY_KEYS,
+        properties: stringProperties(STORY_KEYS),
       },
-    },
-    chapters: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['id', ...CHAPTER_KEYS],
-        properties: { id: { type: 'string' }, ...stringProperties(CHAPTER_KEYS) },
+      volumes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          required: ['id', ...(importing ? ['title'] : []), ...VOLUME_KEYS],
+          properties: {
+            id: { type: 'string' },
+            ...(importing ? { title: { type: 'string' } } : {}),
+            ...stringProperties(VOLUME_KEYS),
+          },
+        },
       },
+      chapters: {
+        type: 'array',
+        items: {
+          type: 'object',
+          required: ['id', ...(importing ? ['volumeId', 'title'] : []), ...CHAPTER_KEYS],
+          properties: {
+            id: { type: 'string' },
+            ...(importing ? {
+              volumeId: { type: 'string' },
+              title: { type: 'string' },
+            } : {}),
+            ...stringProperties(CHAPTER_KEYS),
+          },
+        },
+      },
+      changeSummary: { type: 'array', items: { type: 'string' } },
     },
-    changeSummary: { type: 'array', items: { type: 'string' } },
-  },
-}, null, 2);
+  }, null, 2);
+}
+
+export function applyOutlineTaskRuntimeContract(
+  data: AgentNodeData,
+  operation: FictionOutlineTaskOperation,
+): AgentNodeData {
+  const constraint = operation === 'import'
+    ? '【本次任务结构约束】已有卷章必须复用正式 ID；原文中明确存在的新卷章允许使用 new-volume-*、new-chapter-* 临时 ID，并必须填写标题与所属卷。此约束优先于旧版提示词中禁止新增结构的要求。'
+    : '【本次任务结构约束】只能修改任务快照目标范围内的已有大纲，必须复用正式 ID，不得新建、删除或移动卷纲和章纲。';
+  return {
+    ...data,
+    systemPrompt: [data.systemPrompt?.trim(), constraint].filter(Boolean).join('\n\n'),
+    ...(data.resultRole === OUTLINE_RESULT_ROLE
+      ? { outputSchemaText: outlineResultSchemaText(operation) }
+      : {}),
+  };
+}
 
 export function isFictionistOutlineTaskPayload(
   value: unknown,
@@ -148,14 +192,30 @@ export function outlineTargetLabel(
   target: FictionOutlineTaskTarget,
 ): string {
   if (target.kind === 'story') return '全书大纲';
-  if (target.kind === 'volume') return index.volumes[target.id]?.title ?? '已删除的卷';
-  return index.chapters[target.id]?.title ?? '已删除的章节';
+  for (const project of Object.values(index.projects)) {
+    const outline = project.outline;
+    if (target.kind === 'volume' && outline?.volumes[target.id]) {
+      return outline.volumes[target.id].title;
+    }
+    if (target.kind === 'chapter' && outline?.chapters[target.id]) {
+      return outline.chapters[target.id].title;
+    }
+  }
+  return target.kind === 'volume' ? '已删除的卷纲' : '已删除的章纲';
 }
 
-function targetExists(index: FictionistIndex, projectId: string, target: FictionOutlineTaskTarget) {
+export function outlineTargetExists(
+  index: FictionistIndex,
+  projectId: string,
+  target: FictionOutlineTaskTarget,
+): boolean {
+  const outline = index.projects[projectId]?.outline;
   if (target.kind === 'story') return Boolean(index.projects[projectId]);
-  if (target.kind === 'volume') return index.volumes[target.id]?.projectId === projectId;
-  return index.chapters[target.id]?.projectId === projectId;
+  if (target.kind === 'volume') {
+    return Boolean(outline?.volumeIds.includes(target.id) && outline.volumes[target.id]);
+  }
+  return Boolean(outline && Object.values(outline.volumes)
+    .some((volume) => volume.chapterIds.includes(target.id)) && outline.chapters[target.id]);
 }
 
 function appendImportedText(current: string | undefined, imported: string): string {
@@ -175,7 +235,7 @@ export function applyDirectOutlineImport(
   if (Array.from(normalized).length > MAX_OUTLINE_DETAILS_CHARS) {
     throw new Error(`大纲文件不能超过 ${MAX_OUTLINE_DETAILS_CHARS} 个字符`);
   }
-  if (!targetExists(index, projectId, target)) throw new Error('导入目标已不存在');
+  if (!outlineTargetExists(index, projectId, target)) throw new Error('导入目标已不存在');
   if (target.kind === 'story') {
     return {
       ...outline,
@@ -247,6 +307,15 @@ function readString(
   return normalized;
 }
 
+function readOptionalString(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+  maxChars = MAX_OUTLINE_FIELD_CHARS,
+): string | undefined {
+  return record[key] === undefined ? undefined : readString(record, key, label, maxChars);
+}
+
 function readStory(value: unknown): FictionStoryOutline | null {
   if (value === null) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -282,24 +351,63 @@ function assertTargetScope(
   projectId: string,
   target: FictionOutlineTaskTarget,
   result: FictionOutlineWorkflowResult,
+  operation: FictionOutlineTaskOperation,
 ): void {
-  if (!targetExists(index, projectId, target)) throw new Error('大纲任务目标已不存在');
+  if (!outlineTargetExists(index, projectId, target)) throw new Error('大纲任务目标已不存在');
+  const outline = index.projects[projectId]?.outline ?? createEmptyFictionProjectOutline();
+  const proposedVolumeIds = new Set(result.volumes
+    .filter((volume) => !outline.volumes[volume.id])
+    .map((volume) => volume.id));
+  const seenVolumeIds = new Set<string>();
+  const seenChapterIds = new Set<string>();
   if (target.kind !== 'story' && result.story) throw new Error('结果包含目标范围之外的全书大纲');
   for (const volume of result.volumes) {
-    const current = index.volumes[volume.id];
-    if (!current || current.projectId !== projectId) throw new Error(`结果引用了不存在的卷：${volume.id}`);
+    const current = outline.volumes[volume.id];
+    if (seenVolumeIds.has(volume.id)) throw new Error(`结果包含重复的卷纲 ID：${volume.id}`);
+    seenVolumeIds.add(volume.id);
+    volume.isNew = !current;
+    if (!current) {
+      if (operation === 'optimize') throw new Error(`优化任务不能新建卷纲：${volume.id}`);
+      if (target.kind !== 'story') throw new Error('只有全书大纲导入可以新建卷纲');
+      if (!/^new-volume-[a-z0-9-]+$/u.test(volume.id)) {
+        throw new Error('新卷纲必须使用 new-volume- 开头的临时 ID');
+      }
+      if (!volume.title?.trim()) throw new Error(`新卷纲缺少标题：${volume.id}`);
+    }
     if (target.kind === 'volume' && volume.id !== target.id) {
       throw new Error('结果包含目标范围之外的卷纲');
     }
     if (target.kind === 'chapter') throw new Error('章节优化结果不应包含卷纲');
   }
   for (const chapter of result.chapters) {
-    const current = index.chapters[chapter.id];
-    if (!current || current.projectId !== projectId) {
-      throw new Error(`结果引用了不存在的章节：${chapter.id}`);
+    const current = outline.chapters[chapter.id];
+    if (seenChapterIds.has(chapter.id)) throw new Error(`结果包含重复的章纲 ID：${chapter.id}`);
+    seenChapterIds.add(chapter.id);
+    chapter.isNew = !current;
+    if (!current) {
+      if (operation === 'optimize') throw new Error(`优化任务不能新建章纲：${chapter.id}`);
+      if (target.kind === 'chapter') throw new Error('单章导入不能新建章纲');
+      if (!/^new-chapter-[a-z0-9-]+$/u.test(chapter.id)) {
+        throw new Error('新章纲必须使用 new-chapter- 开头的临时 ID');
+      }
+      if (!chapter.title?.trim()) throw new Error(`新章纲缺少标题：${chapter.id}`);
+      if (!chapter.volumeId) throw new Error(`新章纲缺少所属卷：${chapter.id}`);
+      if (!outline.volumes[chapter.volumeId] && !proposedVolumeIds.has(chapter.volumeId)) {
+        throw new Error(`新章纲引用了不存在的卷纲：${chapter.volumeId}`);
+      }
+      if (target.kind === 'volume' && chapter.volumeId !== target.id) {
+        throw new Error('结果包含目标卷之外的新章纲');
+      }
+    } else if (chapter.volumeId) {
+      const currentVolume = Object.values(outline.volumes).find(
+        (volume) => volume.chapterIds.includes(chapter.id),
+      );
+      if (currentVolume?.id !== chapter.volumeId) {
+        throw new Error('导入任务不能移动已有章纲');
+      }
     }
-    if (target.kind === 'volume' && current.volumeId !== target.id) {
-      throw new Error('结果包含目标卷之外的章节纲要');
+    if (target.kind === 'volume' && !outline.volumes[target.id]?.chapterIds.includes(chapter.id)) {
+      if (!chapter.isNew) throw new Error('结果包含目标卷之外的章节纲要');
     }
     if (target.kind === 'chapter' && chapter.id !== target.id) {
       throw new Error('结果包含目标范围之外的章节纲要');
@@ -319,12 +427,14 @@ export function parseOutlineWorkflowResult(
   index: FictionistIndex,
   projectId: string,
   target: FictionOutlineTaskTarget,
+  operation: FictionOutlineTaskOperation = 'optimize',
 ): FictionOutlineWorkflowResult {
   const record = parseJsonObject(content);
   const result: FictionOutlineWorkflowResult = {
     story: readStory(record.story),
     volumes: readItems(record.volumes, '卷纲', (item) => ({
       id: readString(item, 'id', '卷 ID', 64),
+      title: readOptionalString(item, 'title', '卷纲标题'),
       summary: readString(item, 'summary', '本卷概述'),
       objective: readString(item, 'objective', '阶段目标'),
       turningPoint: readString(item, 'turningPoint', '关键转折'),
@@ -333,6 +443,8 @@ export function parseOutlineWorkflowResult(
     })),
     chapters: readItems(record.chapters, '章节纲要', (item) => ({
       id: readString(item, 'id', '章节 ID', 64),
+      volumeId: readOptionalString(item, 'volumeId', '所属卷 ID', 64),
+      title: readOptionalString(item, 'title', '章纲标题'),
       summary: readString(item, 'summary', '本章概述'),
       objective: readString(item, 'objective', '本章目标'),
       pointOfView: readString(item, 'pointOfView', '视角人物'),
@@ -350,45 +462,94 @@ export function parseOutlineWorkflowResult(
       return item.trim().slice(0, 500);
     });
   }
-  assertTargetScope(index, projectId, target, result);
+  assertTargetScope(index, projectId, target, result, operation);
   return result;
 }
 
 export function applyOutlineWorkflowResult(
   outline: FictionProjectOutline,
   result: FictionOutlineWorkflowResult,
+  createNodeId: typeof createOutlineNodeId = createOutlineNodeId,
 ): FictionProjectOutline {
-  const story = result.story ?? outline;
-  return {
+  const next: FictionProjectOutline = {
     ...outline,
-    ...story,
-    volumes: result.volumes.reduce(
-      (volumes, item) => {
-        const { id, ...fields } = item;
-        volumes[id] = fields;
-        return volumes;
-      },
-      { ...outline.volumes },
-    ),
-    chapters: result.chapters.reduce(
-      (chapters, item) => {
-        const { id, ...fields } = item;
-        chapters[id] = fields;
-        return chapters;
-      },
-      { ...outline.chapters },
-    ),
+    ...(result.story ?? outline),
+    volumeIds: [...outline.volumeIds],
+    volumes: Object.fromEntries(Object.entries(outline.volumes).map(([id, volume]) => [
+      id,
+      { ...volume, chapterIds: [...volume.chapterIds] },
+    ])),
+    chapters: Object.fromEntries(Object.entries(outline.chapters).map(([id, chapter]) => [
+      id,
+      { ...chapter },
+    ])),
   };
+  const volumeIdMap = new Map<string, string>();
+  const occupiedIds = new Set([...Object.keys(next.volumes), ...Object.keys(next.chapters)]);
+  const allocateId = (prefix: 'outline-volume' | 'outline-chapter') => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const id = createNodeId(prefix);
+      if (!occupiedIds.has(id)) {
+        occupiedIds.add(id);
+        return id;
+      }
+    }
+    throw new Error('无法为导入的大纲生成唯一 ID');
+  };
+
+  for (const item of result.volumes) {
+    const { id, title, isNew: _isNew, ...fields } = item;
+    const current = next.volumes[id];
+    if (current) {
+      next.volumes[id] = { ...current, ...fields, ...(title ? { title } : {}) };
+      volumeIdMap.set(id, id);
+      continue;
+    }
+    const localId = allocateId('outline-volume');
+    volumeIdMap.set(id, localId);
+    next.volumeIds.push(localId);
+    next.volumes[localId] = {
+      id: localId,
+      title: title?.trim() || '未命名卷纲',
+      chapterIds: [],
+      ...fields,
+    };
+  }
+
+  for (const item of result.chapters) {
+    const {
+      id,
+      title,
+      volumeId,
+      isNew: _isNew,
+      ...fields
+    } = item;
+    const current = next.chapters[id];
+    if (current) {
+      next.chapters[id] = { ...current, ...fields, ...(title ? { title } : {}) };
+      continue;
+    }
+    const parentVolumeId = volumeId ? (volumeIdMap.get(volumeId) ?? volumeId) : undefined;
+    const parentVolume = parentVolumeId ? next.volumes[parentVolumeId] : undefined;
+    if (!parentVolume) throw new Error(`导入章纲的所属卷不存在：${volumeId ?? id}`);
+    const localId = allocateId('outline-chapter');
+    parentVolume.chapterIds.push(localId);
+    next.chapters[localId] = {
+      id: localId,
+      title: title?.trim() || '未命名章纲',
+      ...fields,
+    };
+  }
+  return next;
 }
 
 function relevantOutline(
   outline: FictionProjectOutline,
-  index: FictionistIndex,
   target: FictionOutlineTaskTarget,
 ): unknown {
   if (target.kind === 'story') return outline;
   if (target.kind === 'volume') {
-    const volume = index.volumes[target.id];
+    const volume = outline.volumes[target.id];
     return {
       volume: outline.volumes[target.id] ?? createEmptyFictionVolumeOutline(),
       chapters: Object.fromEntries((volume?.chapterIds ?? []).map((id) => [
@@ -420,14 +581,14 @@ export function buildOutlineTaskSnapshot(input: {
 }): string {
   const outline = input.outline ?? createEmptyFictionProjectOutline();
   const targetLabel = outlineTargetLabel(input.index, input.target);
-  const structure = input.project.volumeIds.map((volumeId) => {
-    const volume = input.index.volumes[volumeId];
+  const structure = outline.volumeIds.map((volumeId) => {
+    const volume = outline.volumes[volumeId];
     return {
       id: volumeId,
-      title: volume?.title ?? '未知卷',
+      title: volume?.title ?? '未知卷纲',
       chapters: (volume?.chapterIds ?? []).map((chapterId) => ({
         id: chapterId,
-        title: input.index.chapters[chapterId]?.title ?? '未知章节',
+        title: outline.chapters[chapterId]?.title ?? '未知章纲',
       })),
     };
   });
@@ -449,9 +610,9 @@ export function buildOutlineTaskSnapshot(input: {
       ? `- 优化方向：${input.optimizationGoals.join('、')}`
       : '',
     input.requirements?.trim() ? `- 用户补充要求：${input.requirements.trim()}` : '',
-    `## 当前作品结构（必须复用这些 ID，不得虚构卷或章节）\n${JSON.stringify(structure, null, 2)}`,
+    `## 当前大纲结构（已有内容必须复用这些 ID）\n${JSON.stringify(structure, null, 2)}`,
     `## 当前目标范围大纲\n${bounded(JSON.stringify(
-      relevantOutline(outline, input.index, input.target),
+      relevantOutline(outline, input.target),
       null,
       2,
     ), MAX_OUTLINE_WORKFLOW_SOURCE_CHARS)}`,
@@ -474,9 +635,9 @@ export function buildOutlineTaskSnapshot(input: {
       )}`,
     );
   }
-  sections.push(
-    '## 输出约束\n只修改目标范围；保留原意与明确事实；所有卷、章节必须使用“当前作品结构”中的 ID。story 仅在目标为全书大纲时输出对象，否则输出 null。无法对应到现有卷或章节的内容保留在目标范围的 details 字段，不得自行创建 ID。',
-  );
+  sections.push(input.operation === 'import'
+    ? '## 输出约束\n只整理目标范围并保留原意与明确事实。已有卷纲、章纲必须复用“当前大纲结构”中的 ID；原文中明确存在但当前结构中没有的卷纲或章纲，可使用 new-volume-1、new-chapter-1 这类临时 ID 提议新增。每个卷纲必须输出 title，每个章纲必须输出 title 和所属 volumeId。story 仅在目标为全书大纲时输出对象，否则输出 null。'
+    : '## 输出约束\n只修改目标范围；保留原意与明确事实；所有卷纲、章纲必须使用“当前大纲结构”中的 ID，不得自行创建结构。story 仅在目标为全书大纲时输出对象，否则输出 null。');
   return sections.filter(Boolean).join('\n\n');
 }
 
@@ -520,16 +681,16 @@ export function buildOutlineWorkflowGraph(
     label: operation === 'import' ? '标准化大纲' : '输出优化大纲',
     description: '把分析结果转换为小说家可确认写入的结构化大纲。',
     resultRole: OUTLINE_RESULT_ROLE,
-    outputSchemaText: OUTLINE_RESULT_SCHEMA_TEXT,
+    outputSchemaText: outlineResultSchemaText(operation),
     systemPrompt: `你负责把上游分析整理为小说家软件可写入的 JSON。严格匹配输出 Schema，保留输入中的正式事实和 ID，只输出 JSON，不要添加 Markdown 代码块。${operation === 'import'
-      ? '本地原文无法准确拆分的部分放入对应 details 字段。'
+      ? '识别原文中的卷章结构；新结构使用 new-volume-*、new-chapter-* 临时 ID，并填写标题与所属卷。无法准确拆分的部分放入对应 details 字段。'
       : '根据用户选择的强度优化，但不得改动目标范围之外的大纲。'}`,
   });
   if (operation === 'import') {
     const analyzer = taskNode(FICTIONIST_AGENT_IDS.outlineDesigner, modelRef, snapshot, {
       label: '识别本地大纲结构',
-      description: '识别原文中的全书、卷和章节层级，并映射到现有作品结构。',
-      systemPrompt: '分析本地大纲的故事核心、卷级推进、章节安排和未能映射的原文。必须复用任务快照提供的卷 ID 与章节 ID，不得虚构结构；给下游提供清晰、完整的整理建议。',
+      description: '识别原文中的全书、卷和章节层级，映射已有结构并提出缺少的卷纲、章纲。',
+      systemPrompt: '分析本地大纲的故事核心、卷级推进、章节安排和未能映射的原文。已有卷章必须复用任务快照提供的 ID；原文中明确存在的新卷章使用任务约定的临时 ID 提议新增；给下游提供清晰、完整的整理建议。',
     });
     analyzer.position = { x: 80, y: 180 };
     formatter.position = { x: 440, y: 180 };

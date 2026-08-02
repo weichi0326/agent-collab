@@ -437,6 +437,32 @@
   border-bottom: 1px solid var(--fiction-line);
 }
 
+.fictionist-outline-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fictionist-outline-tree-row > .fictionist-outline-tree-item {
+  width: auto;
+  flex: 1;
+}
+
+.fictionist-outline-tree-row > .ant-btn {
+  flex: 0 0 auto;
+  color: var(--fiction-muted);
+}
+
+.fictionist-outline-tree-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.fictionist-outline-tree-empty strong { color: var(--fiction-ink); }
+.fictionist-outline-tree-empty small { line-height: 1.5; }
+
 .fictionist-outline-tree-item {
   width: 100%;
   min-width: 0;
@@ -771,9 +797,19 @@
   margin: 0 auto;
 }
 
+.fictionist-outline-editor > header {
+  position: sticky;
+  top: -24px;
+  z-index: 4;
+  padding-top: 24px;
+  background: var(--fiction-paper);
+}
+
 .fictionist-outline-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -794,6 +830,12 @@
   border-right: 1px solid var(--fiction-line);
 }
 
+.fictionist-outline-progress > span:first-child { min-width: 190px; }
+
+.fictionist-outline-link-status {
+  min-width: 210px !important;
+}
+
 .fictionist-outline-progress strong {
   color: var(--fiction-ink);
   font-size: 16px;
@@ -807,6 +849,18 @@
 
 .fictionist-outline-section {
   padding-bottom: 28px;
+}
+
+.fictionist-outline-manuscript-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -12px 0 22px;
+}
+
+.fictionist-outline-pane-switch {
+  display: none;
+  margin-bottom: 20px;
 }
 
 .fictionist-outline-workspace {
@@ -1806,6 +1860,36 @@
   line-height: 1.4;
 }
 
+.fictionist-outline-reference-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-block: 1px solid var(--fiction-line);
+  background: #f8faf9;
+}
+
+.fictionist-outline-reference-control > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fictionist-outline-reference-control strong {
+  color: var(--fiction-ink);
+  font-size: 13px;
+}
+
+.fictionist-outline-reference-control small {
+  overflow: hidden;
+  color: var(--fiction-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .fictionist-context-details {
   margin-top: 12px;
   border: 1px solid var(--fiction-line);
@@ -2158,6 +2242,28 @@
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+@media (max-width: 1399px) {
+  .fictionist-outline-pane-switch { display: inline-flex; }
+
+  .fictionist-outline-workspace {
+    display: block;
+  }
+
+  .fictionist-outline-workspace[data-pane="structured"] .fictionist-outline-details,
+  .fictionist-outline-workspace[data-pane="details"] .fictionist-outline-structured {
+    display: none;
+  }
+
+  .fictionist-outline-details {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .fictionist-outline-details textarea {
+    min-height: clamp(440px, calc(100vh - 400px), 720px);
+  }
 }
 
 @media (max-width: 1120px) {

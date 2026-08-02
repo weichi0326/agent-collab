@@ -82,7 +82,7 @@ describe('fictionist repository', () => {
 
     const index = await repository.loadOrInitialize();
 
-    expect(index.schemaVersion).toBe(1);
+    expect(index.schemaVersion).toBe(2);
     expect(Object.keys(index.projects)).toHaveLength(3);
     expect(index.activeProjectId).toBe('mist-harbor');
     expect(index.activeChapterId).toBe('chapter-3');
@@ -250,7 +250,7 @@ describe('fictionist repository', () => {
       .projects['mist-harbor'].coverImage).toBe(coverImage);
   });
 
-  it('persists a structured outline and removes entries for deleted chapters and volumes', async () => {
+  it('persists an independent outline tree and only unlinks deleted manuscript entries', async () => {
     const repository = createRepository(storage);
     let index = await repository.loadOrInitialize();
 
@@ -261,8 +261,13 @@ describe('fictionist repository', () => {
       coreConflict: '追查真相会威胁港区现有秩序',
       endingDirection: '守钟人的身份最终公开',
       details: '第一卷寻找航道图，第二卷公开守钟人的身份。',
+      volumeIds: ['outline-volume-1'],
       volumes: {
-        'mist-harbor-volume-1': {
+        'outline-volume-1': {
+          id: 'outline-volume-1',
+          title: '第一卷 · 潮汐失语',
+          chapterIds: ['outline-chapter-3'],
+          linkedVolumeId: 'mist-harbor-volume-1',
           summary: '主角进入雾港并找到第一组证据。',
           objective: '建立谜团',
           turningPoint: '发现航道图被篡改',
@@ -271,7 +276,10 @@ describe('fictionist repository', () => {
         },
       },
       chapters: {
-        'chapter-3': {
+        'outline-chapter-3': {
+          id: 'outline-chapter-3',
+          title: '七号泊位',
+          linkedChapterId: 'chapter-3',
           summary: '林砚进入七号泊位。',
           objective: '找到钟塔入口',
           pointOfView: '林砚',
@@ -287,14 +295,20 @@ describe('fictionist repository', () => {
     expect(index.projects['mist-harbor'].outline).toMatchObject({
       premise: '一封蓝墨水来信把记者引向停摆的港口。',
       details: '第一卷寻找航道图，第二卷公开守钟人的身份。',
-      volumes: { 'mist-harbor-volume-1': { objective: '建立谜团', details: '以七号泊位为入口，逐步逼近钟塔。' } },
-      chapters: { 'chapter-3': { pointOfView: '林砚', details: '场景一调查泊位，场景二追踪钟声。' } },
+      volumeIds: ['outline-volume-1'],
+      volumes: { 'outline-volume-1': { linkedVolumeId: 'mist-harbor-volume-1', objective: '建立谜团' } },
+      chapters: { 'outline-chapter-3': { linkedChapterId: 'chapter-3', pointOfView: '林砚' } },
     });
     expect(JSON.parse(storage.values.get(FICTIONIST_INDEX_KEY) ?? '{}')
-      .projects['mist-harbor'].outline.chapters['chapter-3'].hook).toBe('钟声再次响起');
+      .projects['mist-harbor'].outline.chapters['outline-chapter-3'].hook).toBe('钟声再次响起');
 
     index = await repository.deleteChapter(index, 'chapter-3');
-    expect(index.projects['mist-harbor'].outline?.chapters).not.toHaveProperty('chapter-3');
+    expect(index.projects['mist-harbor'].outline?.chapters['outline-chapter-3']).toMatchObject({
+      id: 'outline-chapter-3',
+      title: '七号泊位',
+    });
+    expect(index.projects['mist-harbor'].outline?.chapters['outline-chapter-3'])
+      .not.toHaveProperty('linkedChapterId');
 
     const volumeResult = await repository.createVolume(index, {
       projectId: 'mist-harbor',
@@ -311,13 +325,22 @@ describe('fictionist repository', () => {
       protagonistGoal: '',
       coreConflict: '',
       endingDirection: '',
+      details: '',
+      volumeIds: ['outline-volume-2'],
       volumes: {
-        [volumeResult.volume.id]: {
+        'outline-volume-2': {
+          id: 'outline-volume-2',
+          title: '第二卷',
+          chapterIds: ['outline-chapter-2'],
+          linkedVolumeId: volumeResult.volume.id,
           summary: '第二阶段', objective: '', turningPoint: '', climax: '',
         },
       },
       chapters: {
-        [chapterResult.chapter.id]: {
+        'outline-chapter-2': {
+          id: 'outline-chapter-2',
+          title: '回声',
+          linkedChapterId: chapterResult.chapter.id,
           summary: '回声出现',
           objective: '',
           pointOfView: '',
@@ -329,10 +352,170 @@ describe('fictionist repository', () => {
       },
     });
     index = await repository.deleteVolume(index, volumeResult.volume.id);
-    expect(index.projects['mist-harbor'].outline?.volumes)
-      .not.toHaveProperty(volumeResult.volume.id);
-    expect(index.projects['mist-harbor'].outline?.chapters)
-      .not.toHaveProperty(chapterResult.chapter.id);
+    expect(index.projects['mist-harbor'].outline?.volumes['outline-volume-2'])
+      .not.toHaveProperty('linkedVolumeId');
+    expect(index.projects['mist-harbor'].outline?.chapters['outline-chapter-2'])
+      .not.toHaveProperty('linkedChapterId');
+  });
+
+  it('migrates legacy outlines into independent nodes linked to existing manuscript entries', async () => {
+    const legacy = createDemoFictionistData().index as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 1;
+    const projects = legacy.projects as Record<string, { outline?: unknown }>;
+    projects['mist-harbor'].outline = {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumes: {
+        'mist-harbor-volume-1': {
+          summary: '第一卷', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'chapter-3': {
+          summary: '进入泊位', objective: '', pointOfView: '', conflict: '',
+          keyEvents: '', clues: '', hook: '', details: '',
+        },
+      },
+      updatedAt: '2026-07-20T00:00:00.000Z',
+    };
+    await storage.setItem(FICTIONIST_INDEX_KEY, JSON.stringify(legacy));
+
+    const index = await createRepository(storage).loadOrInitialize();
+
+    expect(index.schemaVersion).toBe(2);
+    expect(index.projects['mist-harbor'].outline).toMatchObject({
+      volumeIds: ['mist-harbor-volume-1'],
+      volumes: {
+        'mist-harbor-volume-1': {
+          id: 'mist-harbor-volume-1',
+          title: '第一卷 · 潮汐失语',
+          linkedVolumeId: 'mist-harbor-volume-1',
+          chapterIds: ['chapter-3'],
+        },
+      },
+      chapters: {
+        'chapter-3': {
+          id: 'chapter-3',
+          title: '七号泊位',
+          linkedChapterId: 'chapter-3',
+        },
+      },
+    });
+  });
+
+  it('creates manuscript volumes and chapters from independent chapter outlines in outline order', async () => {
+    const repository = createRepository(storage);
+    let index = await repository.loadOrInitialize();
+    index = await repository.updateProjectOutline(index, 'mist-harbor', {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumeIds: ['outline-volume-new'],
+      volumes: {
+        'outline-volume-new': {
+          id: 'outline-volume-new', title: '第二卷纲',
+          chapterIds: ['outline-chapter-a', 'outline-chapter-b'],
+          summary: '', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'outline-chapter-a': {
+          id: 'outline-chapter-a', title: '第一章 · 雨夜来信',
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+        'outline-chapter-b': {
+          id: 'outline-chapter-b', title: '第二章 · 钟塔回声',
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+      },
+    });
+
+    const second = await repository.createChapterFromOutline(index, {
+      projectId: 'mist-harbor',
+      outlineChapterId: 'outline-chapter-b',
+    });
+    const first = await repository.createChapterFromOutline(second.index, {
+      projectId: 'mist-harbor',
+      outlineChapterId: 'outline-chapter-a',
+    });
+    const linkedOutline = first.index.projects['mist-harbor'].outline!;
+    const linkedVolumeId = linkedOutline.volumes['outline-volume-new'].linkedVolumeId!;
+
+    expect(first.created).toBe(true);
+    expect(first.index.volumes[linkedVolumeId].title).toBe('第二卷纲');
+    expect(first.index.volumes[linkedVolumeId].chapterIds.map(
+      (chapterId) => first.index.chapters[chapterId].title,
+    )).toEqual(['第一章 · 雨夜来信', '第二章 · 钟塔回声']);
+    expect(linkedOutline.chapters['outline-chapter-a'].linkedChapterId).toBe(first.chapter.id);
+    expect(linkedOutline.chapters['outline-chapter-b'].linkedChapterId).toBe(second.chapter.id);
+    expect(await repository.readChapter(first.chapter.id)).toBe('');
+
+    const renamed = await repository.renameChapter(first.index, first.chapter.id, '正文独立标题');
+    expect(renamed.projects['mist-harbor'].outline?.chapters['outline-chapter-a'].title)
+      .toBe('第一章 · 雨夜来信');
+  });
+
+  it('reuses the default empty manuscript volume for the first outline volume', async () => {
+    const repository = createRepository(storage);
+    let index = await repository.loadOrInitialize();
+    index = await repository.createProject(index, { title: '新作品', genre: '悬疑' });
+    const project = Object.values(index.projects).find((item) => item.title === '新作品')!;
+    const defaultVolumeId = project.volumeIds[0];
+    index = await repository.updateProjectOutline(index, project.id, {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumeIds: ['outline-volume-first'],
+      volumes: {
+        'outline-volume-first': {
+          id: 'outline-volume-first', title: '第一卷 · 风暴将至', chapterIds: ['outline-chapter-first'],
+          summary: '', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'outline-chapter-first': {
+          id: 'outline-chapter-first', title: '雨夜来信',
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+      },
+    });
+
+    const result = await repository.createChapterFromOutline(index, {
+      projectId: project.id,
+      outlineChapterId: 'outline-chapter-first',
+    });
+
+    expect(result.chapter.volumeId).toBe(defaultVolumeId);
+    expect(result.index.projects[project.id].volumeIds).toEqual([defaultVolumeId]);
+    expect(result.index.volumes[defaultVolumeId].title).toBe('第一卷 · 风暴将至');
+  });
+
+  it('links an existing manuscript chapter by copying the outline title once', async () => {
+    const repository = createRepository(storage);
+    let index = await repository.loadOrInitialize();
+    index = await repository.updateProjectOutline(index, 'mist-harbor', {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumeIds: ['outline-volume-existing'],
+      volumes: {
+        'outline-volume-existing': {
+          id: 'outline-volume-existing', title: '既有正文卷', chapterIds: ['outline-chapter-existing'],
+          summary: '', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'outline-chapter-existing': {
+          id: 'outline-chapter-existing', title: '章纲确定的标题',
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+      },
+    });
+
+    const linked = await repository.linkOutlineChapter(index, {
+      projectId: 'mist-harbor',
+      outlineChapterId: 'outline-chapter-existing',
+      chapterId: 'chapter-3',
+    });
+
+    expect(linked.chapters['chapter-3'].title).toBe('章纲确定的标题');
+    expect(linked.projects['mist-harbor'].outline?.volumes['outline-volume-existing'].linkedVolumeId)
+      .toBe('mist-harbor-volume-1');
+    expect(linked.projects['mist-harbor'].outline?.chapters['outline-chapter-existing'].linkedChapterId)
+      .toBe('chapter-3');
   });
 
   it('rejects unsupported custom cover data', async () => {

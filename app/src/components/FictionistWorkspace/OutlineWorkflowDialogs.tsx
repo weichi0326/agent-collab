@@ -149,7 +149,7 @@ export function OutlineImportModal({
         <p className="fictionist-modal-note">
           {method === 'direct'
             ? '直接导入不会猜测卷章结构，只写入所选层级的“详细大纲”。'
-            : 'AI 只生成待确认结果；返回小说家并确认后才会写入正式大纲。'}
+            : 'AI 会识别卷纲和章纲并生成待确认结果；确认后才会新增或更新正式大纲。'}
         </p>
       </div>
     </Modal>
@@ -304,16 +304,18 @@ function OutlineReviewEntry({
   level,
   title,
   fields,
+  isNew = false,
 }: {
   level: '全书' | '卷纲' | '章纲';
   title: string;
   fields: OutlineReviewField[];
+  isNew?: boolean;
 }) {
   return (
     <article className="fictionist-outline-review-entry">
       <header>
         <span><small>{level}</small><strong>{title}</strong></span>
-        <Tag>{level}</Tag>
+        <Tag color={isNew ? 'blue' : undefined}>{isNew ? '新增' : level}</Tag>
       </header>
       <dl>
         {fields.map((field) => (
@@ -342,7 +344,7 @@ export function OutlineReviewContent({
     <div className="fictionist-outline-review">
       <div className="fictionist-outline-review-summary">
         <span><small>目标范围</small><strong>{targetLabel}</strong></span>
-        <span><small>将更新</small><strong>{affected}</strong></span>
+        <span><small>将写入</small><strong>{affected}</strong></span>
         <Tag color="green">待确认</Tag>
       </div>
       <section>
@@ -370,7 +372,8 @@ export function OutlineReviewContent({
           <OutlineReviewEntry
             key={volume.id}
             level="卷纲"
-            title={volumeLabels[volume.id] ?? `第 ${index + 1} 个卷纲`}
+            title={volume.title ?? volumeLabels[volume.id] ?? `第 ${index + 1} 个卷纲`}
+            isNew={volume.isNew}
             fields={[
               { label: '本卷概述', value: volume.summary },
               { label: '阶段目标', value: volume.objective },
@@ -384,7 +387,8 @@ export function OutlineReviewContent({
           <OutlineReviewEntry
             key={chapter.id}
             level="章纲"
-            title={chapterLabels[chapter.id] ?? `第 ${index + 1} 个章节纲要`}
+            title={chapter.title ?? chapterLabels[chapter.id] ?? `第 ${index + 1} 个章节纲要`}
+            isNew={chapter.isNew}
             fields={[
               { label: '本章概述', value: chapter.summary },
               { label: '本章目标', value: chapter.objective },

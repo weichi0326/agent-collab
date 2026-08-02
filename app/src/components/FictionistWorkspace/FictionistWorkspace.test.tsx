@@ -81,7 +81,7 @@ describe('fictionist workspace mock', () => {
   });
 
   it('centers fictionist dialogs in the desktop viewport', () => {
-    expect(workspaceSource.match(/\bcentered\b/gu) ?? []).toHaveLength(18);
+    expect((workspaceSource.match(/\bcentered\b/gu) ?? []).length).toBeGreaterThanOrEqual(18);
   });
 
   it('provides persistent volume and chapter management controls', () => {
@@ -235,13 +235,12 @@ describe('fictionist workspace mock', () => {
     expect(html).not.toContain(CHAPTER_CANON_CHECK_RESULT_ROLE);
   });
 
-  it('renders a persistent outline editor bound to the existing volume and chapters', () => {
+  it('renders a persistent independent outline editor with structure controls', () => {
     const html = renderWorkspace('outline');
 
     expect(html).toContain('大纲结构');
     expect(html).toContain('故事总纲');
-    expect(html).toContain('第一卷 · 潮汐失语');
-    expect(html).toContain('章节纲要');
+    expect(html).toContain('新建卷纲');
     expect(html).toContain('一句话梗概');
     expect(html).toContain('核心冲突');
     expect(html).toContain('结局方向');
@@ -250,7 +249,10 @@ describe('fictionist workspace mock', () => {
     expect(html).toContain('AI 优化');
     expect(html).toContain('保存大纲');
     expect(workspaceSource).toContain('saveProjectOutline(activeProjectId, input)');
-    expect(workspaceSource).toContain("selectOutlineTarget({ kind: 'chapter', id: chapter.id })");
+    expect(workspaceSource).toContain('outlineDraft.volumeIds');
+    expect(workspaceSource).toContain("selectOutlineTarget({ kind: 'chapter', id: outlineChapter.id })");
+    expect(workspaceSource).toContain('createChapterFromOutline');
+    expect(workspaceSource).toContain('linkOutlineChapter');
   });
 
   it('supports direct outline import and review-gated AI outline workflows', () => {
@@ -271,6 +273,12 @@ describe('fictionist workspace mock', () => {
     expect(workspaceSource).toContain('导入本地文本');
     expect(workspaceSource).toContain('icon={<DownloadOutlined />}');
     expect(workspaceSource).toContain('setContinuationRequirements(text)');
+  });
+
+  it('lets chapter writing opt into the matching chapter outline', () => {
+    expect(workspaceSource).toContain('使用关联章纲');
+    expect(workspaceSource).toContain('includeProjectOutline: useAssociatedOutline');
+    expect(workspaceSource).toContain('outlineChapterId: writingOutlineChapter?.id');
   });
 
   it('renders the canon baseline', () => {

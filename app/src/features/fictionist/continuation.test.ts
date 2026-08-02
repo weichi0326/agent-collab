@@ -153,4 +153,75 @@ describe('fictionist continuation template', () => {
 
     expect(payload.proposedChapterTitle).toBe('钟楼之下');
   });
+
+  it('includes a linked chapter outline only when the user enables it', () => {
+    const projectOutline = {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumeIds: ['outline-volume-1'],
+      volumes: {
+        'outline-volume-1': {
+          id: 'outline-volume-1', title: '第一卷纲', chapterIds: ['outline-chapter-1'],
+          summary: '', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'outline-chapter-1': {
+          id: 'outline-chapter-1', title: '钟塔停摆', linkedChapterId: chapter.id,
+          summary: '记者进入钟塔', objective: '找到寄信人', pointOfView: '林砚',
+          conflict: '守钟人阻拦', keyEvents: '发现旧信', clues: '蓝色墨迹', hook: '钟声倒转', details: '',
+        },
+      },
+      updatedAt: '2026-07-23T00:00:00.000Z',
+    };
+    const base = {
+      mode: 'draft-current' as const,
+      project: { ...project, outline: projectOutline },
+      chapter,
+      chapterContent: '',
+      nextChapterGoal: '开始调查',
+      writingRequirements: '',
+      targetWordCount: 2000,
+      projectOutline,
+    };
+
+    expect(buildContinuationSnapshot({ ...base, includeProjectOutline: true }))
+      .toContain('相关章节目标：找到寄信人');
+    expect(buildContinuationSnapshot({ ...base, includeProjectOutline: false }))
+      .not.toContain('相关章节目标：找到寄信人');
+  });
+
+  it('can use a selected next chapter outline before its manuscript chapter exists', () => {
+    const projectOutline = {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumeIds: ['outline-volume-1'],
+      volumes: {
+        'outline-volume-1': {
+          id: 'outline-volume-1', title: '第一卷纲', chapterIds: ['outline-chapter-next'],
+          summary: '', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'outline-chapter-next': {
+          id: 'outline-chapter-next', title: '下一章 · 钟塔回声',
+          summary: '记者进入钟塔', objective: '找到寄信人', pointOfView: '林砚',
+          conflict: '守钟人阻拦', keyEvents: '发现旧信', clues: '蓝色墨迹', hook: '钟声倒转', details: '',
+        },
+      },
+      updatedAt: '2026-07-23T00:00:00.000Z',
+    };
+    const request = {
+      project: { ...project, outline: projectOutline },
+      chapter,
+      chapterContent: '雾中传来钟声。',
+      nextChapterGoal: '',
+      writingRequirements: '',
+      targetWordCount: 2000,
+      projectOutline,
+      outlineChapterId: 'outline-chapter-next',
+      includeProjectOutline: true,
+    };
+
+    expect(buildContinuationSnapshot(request)).toContain('相关章节目标：找到寄信人');
+    expect(continuationPayload(request).outlineChapterId).toBe('outline-chapter-next');
+  });
 });

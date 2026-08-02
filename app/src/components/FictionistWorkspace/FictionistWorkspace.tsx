@@ -33,6 +33,7 @@ import {
   EditOutlined,
   ExclamationCircleOutlined,
   EyeOutlined,
+  ExportOutlined,
   FileTextOutlined,
   FolderOutlined,
   MoreOutlined,
@@ -50,12 +51,12 @@ import {
   canonEntriesForProject,
   chaptersForProject,
   countFictionWords,
-  createEmptyFictionChapterOutline,
   createEmptyFictionProjectOutline,
-  createEmptyFictionVolumeOutline,
   projectWordCount,
   timelineEventsForProject,
   type FictionProjectOutline,
+  type FictionOutlineChapter,
+  type FictionOutlineVolume,
   type FictionChapterStatus,
   type FictionProject,
   type FictionistIndex,
@@ -65,6 +66,10 @@ import {
   type FictionTimelineEvent,
   type FictionTimelineEventKind,
 } from '../../features/fictionist/domain';
+import {
+  applyOutlineStructureChange,
+  createOutlineNodeId,
+} from '../../features/fictionist/outlineStructure';
 import { useFictionistStore } from '../../features/fictionist/fictionistStore';
 import type { FictionSearchMatch } from '../../features/fictionist/repository';
 import {
@@ -104,6 +109,7 @@ import {
 } from '../../features/fictionist/systemWorkflows';
 import {
   applyDirectOutlineImport,
+  applyOutlineTaskRuntimeContract,
   applyOutlineWorkflowResult,
   buildOutlineTaskSnapshot,
   FICTIONIST_OUTLINE_WORKFLOW_KEYS,
@@ -170,7 +176,16 @@ type InspectorMode = 'context' | 'checks';
 type StructureEditor =
   | { kind: 'create-volume' }
   | { kind: 'rename-volume'; id: string }
-  | { kind: 'rename-chapter'; id: string };
+  | { kind: 'rename-chapter'; id: string }
+  | { kind: 'create-outline-volume' }
+  | { kind: 'rename-outline-volume'; id: string }
+  | { kind: 'create-outline-chapter'; volumeId: string }
+  | { kind: 'rename-outline-chapter'; id: string };
+
+interface OutlineChapterLinkState {
+  outlineChapterId: string;
+  chapterId?: string;
+}
 
 interface OutlineDraftState {
   projectId: string;
@@ -201,6 +216,7 @@ function outlineWorkflowResultForTask(
     index,
     task.packagePayload.projectId,
     task.packagePayload.target,
+    task.packagePayload.operation,
   );
 }
 
@@ -230,6 +246,54 @@ const SEARCH_FIELD_LABELS: Record<FictionSearchMatch['field'], string> = {
   content: '正文',
   'volume-title': '卷名',
 };
+
+function volumeOutlineIsFilled(volume: FictionOutlineVolume): boolean {
+  return [volume.summary, volume.objective, volume.turningPoint, volume.climax, volume.details]
+    .some((value) => value?.trim());
+}
+
+function chapterOutlineIsFilled(chapter: FictionOutlineChapter): boolean {
+  return [
+    chapter.summary,
+    chapter.objective,
+    chapter.pointOfView,
+    chapter.conflict,
+    chapter.keyEvents,
+    chapter.clues,
+    chapter.hook,
+    chapter.details,
+  ].some((value) => value?.trim());
+}
+
+function outlineChapterForWriting(
+  outline: FictionProjectOutline | undefined,
+  mode: ChapterWritingMode,
+  sourceChapterId: string,
+  targetChapterId?: string,
+): FictionOutlineChapter | undefined {
+  if (!outline) return undefined;
+  if (mode === 'draft-current') {
+    return Object.values(outline.chapters).find(
+      (chapter) => chapter.linkedChapterId === sourceChapterId,
+    );
+  }
+  if (targetChapterId) {
+    const targetOutline = Object.values(outline.chapters).find(
+      (chapter) => chapter.linkedChapterId === targetChapterId,
+    );
+    if (targetOutline) return targetOutline;
+  }
+  const sourceOutline = Object.values(outline.chapters).find(
+    (chapter) => chapter.linkedChapterId === sourceChapterId,
+  );
+  if (!sourceOutline) return undefined;
+  const volume = Object.values(outline.volumes).find(
+    (item) => item.chapterIds.includes(sourceOutline.id),
+  );
+  const sourceIndex = volume?.chapterIds.indexOf(sourceOutline.id) ?? -1;
+  const nextOutlineId = sourceIndex >= 0 ? volume?.chapterIds[sourceIndex + 1] : undefined;
+  return nextOutlineId ? outline.chapters[nextOutlineId] : undefined;
+}
 
 const TIMELINE_KIND_LABELS: Record<FictionTimelineEventKind, string> = {
   background: '背景事件',
@@ -481,6 +545,8 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
   const reorderTimelineEvent = useFictionistStore((state) => state.reorderTimelineEvent);
   const deleteTimelineEvent = useFictionistStore((state) => state.deleteTimelineEvent);
   const saveProjectOutline = useFictionistStore((state) => state.saveProjectOutline);
+  const createChapterFromOutline = useFictionistStore((state) => state.createChapterFromOutline);
+  const linkOutlineChapter = useFictionistStore((state) => state.linkOutlineChapter);
   const deleteProject = useFictionistStore((state) => state.deleteProject);
   const createVolume = useFictionistStore((state) => state.createVolume);
   const renameVolume = useFictionistStore((state) => state.renameVolume);
@@ -522,6 +588,8 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
   const [proposedChapterTitle, setProposedChapterTitle] = useState('');
   const [continuationGoal, setContinuationGoal] = useState('');
   const [continuationRequirements, setContinuationRequirements] = useState('');
+  const [writingOutlineChapterId, setWritingOutlineChapterId] = useState<string>();
+  const [useAssociatedOutline, setUseAssociatedOutline] = useState(false);
   const [writingRequirementsSourceName, setWritingRequirementsSourceName] = useState<string>();
   const [targetWordCount, setTargetWordCount] = useState(2000);
   const [selectedModel, setSelectedModel] = useState<string>();
@@ -575,6 +643,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
   const [creatingOutlineTask, setCreatingOutlineTask] = useState(false);
   const [outlineReviewState, setOutlineReviewState] = useState<OutlineReviewState>();
   const [savingOutlineReview, setSavingOutlineReview] = useState(false);
+  const [outlineChapterLinkState, setOutlineChapterLinkState] = useState<OutlineChapterLinkState>();
   const [canonEditorOpen, setCanonEditorOpen] = useState(false);
   const [canonEditorEntry, setCanonEditorEntry] = useState<FictionCanonEntry>();
   const [savingCanonEntry, setSavingCanonEntry] = useState(false);
@@ -750,6 +819,9 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     new Set(books.map((book) => book.genre)),
   ).sort((left, right) => left.localeCompare(right, 'zh-CN')), [books]);
   const activeBook = books.find((book) => book.id === activeProjectId) ?? books[0] ?? null;
+  const writingOutlineChapter = writingOutlineChapterId
+    ? activeBook?.outline?.chapters[writingOutlineChapterId]
+    : undefined;
   const canonEntries = useMemo(
     () => (activeProjectId ? canonEntriesForProject(index, activeProjectId) : []),
     [activeProjectId, index],
@@ -826,19 +898,28 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
   const activeVolume = selectedChapter
     ? index.volumes[selectedChapter.volumeId]
     : activeVolumes[0];
+  const outlineVolumes = useMemo(() => outlineDraft.volumeIds.flatMap((volumeId) => {
+    const volume = outlineDraft.volumes[volumeId];
+    return volume ? [volume] : [];
+  }), [outlineDraft]);
+  const outlineChapters = useMemo(() => outlineVolumes.flatMap((volume) =>
+    volume.chapterIds.flatMap((chapterId) => {
+      const chapter = outlineDraft.chapters[chapterId];
+      return chapter ? [chapter] : [];
+    })), [outlineDraft.chapters, outlineVolumes]);
   const outlineTargetOptions = useMemo<OutlineTargetOption[]>(() => [
     { label: '全书大纲', value: 'story' },
-    ...activeVolumes.flatMap((volume) => [
-      { label: `卷：${volume.title}`, value: outlineTargetValue({ kind: 'volume', id: volume.id }) },
+    ...outlineVolumes.flatMap((volume) => [
+      { label: `卷纲：${volume.title}`, value: outlineTargetValue({ kind: 'volume', id: volume.id }) },
       ...volume.chapterIds.flatMap((chapterId) => {
-        const chapter = index.chapters[chapterId];
+        const chapter = outlineDraft.chapters[chapterId];
         return chapter ? [{
-          label: `章节：${chapter.title}`,
+          label: `章纲：${chapter.title}`,
           value: outlineTargetValue({ kind: 'chapter', id: chapter.id }),
         }] : [];
       }),
     ]),
-  ], [activeVolumes, index.chapters]);
+  ], [outlineDraft.chapters, outlineVolumes]);
   const outlineImportSourceChars = useMemo(
     () => Array.from(outlineImportSourceText).length,
     [outlineImportSourceText],
@@ -851,35 +932,63 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
   const chapterNumberById = useMemo(() => new Map(
     chapters.map((chapter, chapterIndex) => [chapter.id, chapterIndex + 1]),
   ), [chapters]);
+  const outlineChapterNumberById = useMemo(() => new Map(
+    outlineChapters.map((chapter, chapterIndex) => [chapter.id, chapterIndex + 1]),
+  ), [outlineChapters]);
   const outlineReviewVolumeLabels = useMemo(
-    () => Object.fromEntries(activeVolumes.map((volume) => [volume.id, volume.title])),
-    [activeVolumes],
+    () => Object.fromEntries(outlineVolumes.map((volume) => [volume.id, volume.title])),
+    [outlineVolumes],
   );
   const outlineReviewChapterLabels = useMemo(
-    () => Object.fromEntries(chapters.map((chapter, chapterIndex) => [
+    () => Object.fromEntries(outlineChapters.map((chapter, chapterIndex) => [
       chapter.id,
       `第 ${chapterIndex + 1} 章 · ${chapter.title}`,
     ])),
-    [chapters],
+    [outlineChapters],
   );
   const requestedOutlineTarget = outlineTargetState?.projectId === activeProjectId
     ? outlineTargetState.target
     : { kind: 'story' } as const;
   const outlineTarget: FictionOutlineTarget = requestedOutlineTarget.kind === 'volume'
-    && activeVolumes.some((volume) => volume.id === requestedOutlineTarget.id)
+    && Boolean(outlineDraft.volumes[requestedOutlineTarget.id])
     ? requestedOutlineTarget
     : requestedOutlineTarget.kind === 'chapter'
-      && chapters.some((chapter) => chapter.id === requestedOutlineTarget.id)
+      && Boolean(outlineDraft.chapters[requestedOutlineTarget.id])
       ? requestedOutlineTarget
       : { kind: 'story' };
   const outlineVolume = outlineTarget.kind === 'volume'
-    ? index.volumes[outlineTarget.id]
+    ? outlineDraft.volumes[outlineTarget.id]
     : outlineTarget.kind === 'chapter'
-      ? index.volumes[index.chapters[outlineTarget.id]?.volumeId]
+      ? outlineVolumes.find((volume) => volume.chapterIds.includes(outlineTarget.id))
       : undefined;
   const outlineChapter = outlineTarget.kind === 'chapter'
-    ? index.chapters[outlineTarget.id]
+    ? outlineDraft.chapters[outlineTarget.id]
     : undefined;
+  const linkedManuscriptChapter = outlineChapter?.linkedChapterId
+    ? index.chapters[outlineChapter.linkedChapterId]
+    : undefined;
+  const linkingOutlineChapter = outlineChapterLinkState
+    ? outlineDraft.chapters[outlineChapterLinkState.outlineChapterId]
+    : undefined;
+  const linkingOutlineVolume = linkingOutlineChapter
+    ? outlineVolumes.find((volume) => volume.chapterIds.includes(linkingOutlineChapter.id))
+    : undefined;
+  const alreadyLinkedManuscriptIds = useMemo(() => new Set(outlineChapters.flatMap((chapter) =>
+    chapter.linkedChapterId && chapter.id !== outlineChapterLinkState?.outlineChapterId
+      ? [chapter.linkedChapterId]
+      : [])), [outlineChapterLinkState?.outlineChapterId, outlineChapters]);
+  const manuscriptChapterLinkOptions = useMemo(() => {
+    const requiredVolumeId = linkingOutlineVolume?.linkedVolumeId;
+    return chapters.flatMap((chapter) => {
+      if (alreadyLinkedManuscriptIds.has(chapter.id)) return [];
+      if (requiredVolumeId && chapter.volumeId !== requiredVolumeId) return [];
+      const volume = index.volumes[chapter.volumeId];
+      return [{
+        value: chapter.id,
+        label: `${volume?.title ?? '未分卷'} · ${chapter.title}`,
+      }];
+    });
+  }, [alreadyLinkedManuscriptIds, chapters, index.volumes, linkingOutlineVolume?.linkedVolumeId]);
   const visibleChapters = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return chapters;
@@ -970,12 +1079,28 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     && isFictionistContinuationPayload(task.packagePayload)
     && task.packagePayload.projectId === activeProjectId,
   );
-  const pendingOutlineTask = Object.values(professionalTasks).find((task) =>
-    task.packageId === FICTIONIST_PACKAGE_ID
-    && task.status === 'review_required'
-    && isFictionistOutlineTaskPayload(task.packagePayload)
-    && task.packagePayload.projectId === activeProjectId,
-  );
+  const pendingOutlineTasks = useMemo(() => Object.values(professionalTasks)
+    .filter((task) => task.packageId === FICTIONIST_PACKAGE_ID
+      && task.status === 'review_required'
+      && isFictionistOutlineTaskPayload(task.packagePayload)
+      && task.packagePayload.projectId === activeProjectId)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)), [
+      activeProjectId,
+      professionalTasks,
+    ]);
+  const pendingOutlineTasksByTarget = useMemo(() => {
+    const grouped = new Map<string, ProfessionalTask[]>();
+    for (const task of pendingOutlineTasks) {
+      if (!isFictionistOutlineTaskPayload(task.packagePayload)) continue;
+      const key = outlineTargetValue(task.packagePayload.target);
+      grouped.set(key, [...(grouped.get(key) ?? []), task]);
+    }
+    return grouped;
+  }, [pendingOutlineTasks]);
+  const currentPendingOutlineTasks = pendingOutlineTasksByTarget.get(
+    outlineTargetValue(outlineTarget),
+  ) ?? [];
+  const pendingOutlineTask = currentPendingOutlineTasks[0];
   const outlineReviewTask = outlineReviewState
     ? professionalTasks[outlineReviewState.taskId]
     : undefined;
@@ -1011,9 +1136,10 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     field: VolumeOutlineField,
     value: string,
   ) => {
-    if (!activeVolumes.some((volume) => volume.id === volumeId)) return;
+    if (!outlineDraft.volumes[volumeId]) return;
     updateOutlineDraft((current) => {
-      const volumeOutline = current.volumes[volumeId] ?? createEmptyFictionVolumeOutline();
+      const volumeOutline = current.volumes[volumeId];
+      if (!volumeOutline) return current;
       return {
         ...current,
         volumes: {
@@ -1029,9 +1155,10 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     field: ChapterOutlineField,
     value: string,
   ) => {
-    if (!chapters.some((chapter) => chapter.id === chapterId)) return;
+    if (!outlineDraft.chapters[chapterId]) return;
     updateOutlineDraft((current) => {
-      const chapterOutline = current.chapters[chapterId] ?? createEmptyFictionChapterOutline();
+      const chapterOutline = current.chapters[chapterId];
+      if (!chapterOutline) return current;
       return {
         ...current,
         chapters: {
@@ -1844,6 +1971,17 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     return () => window.removeEventListener('keydown', saveWithShortcut);
   }, [section]);
 
+  useEffect(() => {
+    if (section !== 'outline') return undefined;
+    const saveOutlineWithShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
+      event.preventDefault();
+      if (outlineDirtyRef.current) void saveOutlineRef.current();
+    };
+    window.addEventListener('keydown', saveOutlineWithShortcut);
+    return () => window.removeEventListener('keydown', saveOutlineWithShortcut);
+  }, [section]);
+
   const addChapter = async (volumeId?: string) => {
     const targetVolumeId = volumeId ?? selectedChapter?.volumeId ?? activeVolumes.at(-1)?.id;
     const chapterId = await createStoredChapter(targetVolumeId);
@@ -1903,12 +2041,67 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     setStructureTitle(chapter.title);
   };
 
+  const openCreateOutlineVolume = () => {
+    setStructureEditor({ kind: 'create-outline-volume' });
+    setStructureTitle(`第${outlineVolumes.length + 1}卷纲`);
+  };
+
+  const openRenameOutlineVolume = (volume: FictionOutlineVolume) => {
+    setStructureEditor({ kind: 'rename-outline-volume', id: volume.id });
+    setStructureTitle(volume.title);
+  };
+
+  const openCreateOutlineChapter = (volumeId: string) => {
+    const volume = outlineDraft.volumes[volumeId];
+    if (!volume) return;
+    setStructureEditor({ kind: 'create-outline-chapter', volumeId });
+    setStructureTitle(`未命名章纲 ${outlineChapters.length + 1}`);
+  };
+
+  const openRenameOutlineChapter = (chapter: FictionOutlineChapter) => {
+    setStructureEditor({ kind: 'rename-outline-chapter', id: chapter.id });
+    setStructureTitle(chapter.title);
+  };
+
   const confirmStructureEdit = async () => {
     const title = structureTitle.trim();
     if (!structureEditor || !title || savingStructure) return;
     setSavingStructure(true);
     try {
-      if (structureEditor.kind === 'create-volume') {
+      if (structureEditor.kind === 'create-outline-volume') {
+        const volumeId = createOutlineNodeId('outline-volume');
+        updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+          type: 'add-volume',
+          id: volumeId,
+          title,
+        }));
+        setOutlineTargetState(activeProjectId
+          ? { projectId: activeProjectId, target: { kind: 'volume', id: volumeId } }
+          : undefined);
+        message.success(`已新建卷纲“${title}”`);
+      } else if (structureEditor.kind === 'create-outline-chapter') {
+        const chapterId = createOutlineNodeId('outline-chapter');
+        updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+          type: 'add-chapter',
+          id: chapterId,
+          volumeId: structureEditor.volumeId,
+          title,
+        }));
+        setOutlineTargetState(activeProjectId
+          ? { projectId: activeProjectId, target: { kind: 'chapter', id: chapterId } }
+          : undefined);
+        message.success(`已新建章纲“${title}”`);
+      } else if (structureEditor.kind === 'rename-outline-volume') {
+        updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+          type: 'rename-volume', id: structureEditor.id, title,
+        }));
+        message.success(`卷纲已重命名为“${title}”`);
+      } else if (structureEditor.kind === 'rename-outline-chapter') {
+        updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+          type: 'rename-chapter', id: structureEditor.id, title,
+        }));
+        message.success(`章纲已重命名为“${title}”`);
+      } else if (structureEditor.kind === 'create-volume') {
         const volumeId = await createVolume(title);
         if (!volumeId) {
           message.error(storeError('创建卷失败'));
@@ -2010,6 +2203,124 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     });
   };
 
+  const moveOutlineVolume = (volumeId: string, targetIndex: number) => {
+    updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+      type: 'move-volume', id: volumeId, targetIndex,
+    }));
+  };
+
+  const moveOutlineChapter = (
+    chapterId: string,
+    targetVolumeId: string,
+    targetIndex: number,
+  ) => {
+    updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+      type: 'move-chapter', id: chapterId, targetVolumeId, targetIndex,
+    }));
+  };
+
+  const confirmDeleteOutlineVolume = (volume: FictionOutlineVolume) => {
+    modal.confirm({
+      centered: true,
+      title: `删除卷纲“${volume.title}”？`,
+      icon: <ExclamationCircleOutlined />,
+      okText: '删除卷纲',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      content: `将删除本卷纲及其中 ${volume.chapterIds.length} 个章纲。已创建的正文卷和章节会保留，只解除关联。`,
+      onOk: () => {
+        updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+          type: 'delete-volume', id: volume.id,
+        }));
+        if (activeProjectId && ((outlineTarget.kind === 'volume' && outlineTarget.id === volume.id)
+          || (outlineTarget.kind === 'chapter' && volume.chapterIds.includes(outlineTarget.id)))) {
+          setOutlineTargetState({ projectId: activeProjectId, target: { kind: 'story' } });
+        }
+        message.success(`已从大纲删除“${volume.title}”，正文未受影响`);
+      },
+    });
+  };
+
+  const confirmDeleteOutlineChapter = (
+    volume: FictionOutlineVolume,
+    chapter: FictionOutlineChapter,
+  ) => {
+    modal.confirm({
+      centered: true,
+      title: `删除章纲“${chapter.title}”？`,
+      icon: <ExclamationCircleOutlined />,
+      okText: '删除章纲',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      content: '只删除这份章纲。已经创建或关联的正文章节会保留。',
+      onOk: () => {
+        updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+          type: 'delete-chapter', id: chapter.id,
+        }));
+        if (activeProjectId && outlineTarget.kind === 'chapter' && outlineTarget.id === chapter.id) {
+          setOutlineTargetState({
+            projectId: activeProjectId,
+            target: { kind: 'volume', id: volume.id },
+          });
+        }
+        message.success(`已从大纲删除“${chapter.title}”，正文未受影响`);
+      },
+    });
+  };
+
+  const createManuscriptChapterFromOutline = async (outlineChapterId: string) => {
+    if (outlineDirty && !(await persistOutlineDraft(false))) {
+      message.error(storeError('大纲保存失败，未创建正文章节'));
+      return;
+    }
+    const chapterId = await createChapterFromOutline(outlineChapterId);
+    if (!chapterId) {
+      message.error(storeError('从章纲创建章节失败'));
+      return;
+    }
+    setOutlineDraftState(undefined);
+    setSection('chapters');
+    setEditorMode('edit');
+    message.success('已按章纲标题和顺序创建正文章节');
+  };
+
+  const openLinkedManuscriptChapter = async (chapterId: string) => {
+    if (outlineDirty && !(await persistOutlineDraft(false))) {
+      message.error(storeError('大纲保存失败，未打开正文章节'));
+      return;
+    }
+    if (!(await selectChapter(chapterId))) {
+      message.error(storeError('打开正文章节失败'));
+      return;
+    }
+    setOutlineDraftState(undefined);
+    setSection('chapters');
+    setEditorMode('edit');
+  };
+
+  const unlinkOutlineChapter = (outlineChapterId: string) => {
+    updateOutlineDraft((current) => applyOutlineStructureChange(current, {
+      type: 'unlink-chapter', id: outlineChapterId,
+    }));
+    message.success('已解除章纲与正文的关联，双方内容均已保留');
+  };
+
+  const confirmLinkOutlineChapter = async () => {
+    const linkState = outlineChapterLinkState;
+    if (!linkState?.chapterId) return;
+    if (outlineDirty && !(await persistOutlineDraft(false))) {
+      message.error(storeError('大纲保存失败，未关联章节'));
+      return;
+    }
+    if (!(await linkOutlineChapter(linkState.outlineChapterId, linkState.chapterId))) {
+      message.error(storeError('关联正文章节失败'));
+      return;
+    }
+    setOutlineDraftState(undefined);
+    setOutlineChapterLinkState(undefined);
+    message.success('已关联正文章节，并按章纲复制一次标题和相对顺序');
+  };
+
   const openBookSearch = () => {
     setBookSearchOpen(true);
     setBookSearchQuery('');
@@ -2096,10 +2407,18 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     const position = volume?.chapterIds.indexOf(selectedChapter.id) ?? -1;
     const nextChapterId = position >= 0 ? volume?.chapterIds[position + 1] : undefined;
     const nextChapter = nextChapterId ? index.chapters[nextChapterId] : undefined;
+    const writingOutline = outlineChapterForWriting(
+      index.projects[selectedChapter.projectId]?.outline,
+      mode,
+      selectedChapter.id,
+      nextChapter?.id,
+    );
     setWritingMode(mode);
+    setWritingOutlineChapterId(writingOutline?.id);
+    setUseAssociatedOutline(Boolean(writingOutline));
     setProposedChapterTitle(mode === 'draft-current'
       ? selectedChapter.title
-      : nextChapter?.title ?? `未命名章节 ${chapters.length + 1}`);
+      : nextChapter?.title ?? writingOutline?.title ?? `未命名章节 ${chapters.length + 1}`);
     setContinueOpen(true);
   };
 
@@ -2112,6 +2431,8 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
     setSection('chapters');
     setEditorMode('edit');
     setWritingMode('draft-current');
+    setWritingOutlineChapterId(undefined);
+    setUseAssociatedOutline(false);
     setProposedChapterTitle(
       useFictionistStore.getState().index.chapters[chapterId]?.title ?? '未命名章节 1',
     );
@@ -2184,6 +2505,8 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
         canonEntries: canonEntriesForProject(current.index, project.id),
         timelineEvents: timelineEventsForProject(current.index, project.id),
         projectOutline: project.outline,
+        outlineChapterId: writingOutlineChapter?.id,
+        includeProjectOutline: useAssociatedOutline,
       };
       const snapshot = buildContinuationSnapshot(request);
       const payload = continuationPayload(request);
@@ -2382,10 +2705,11 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
         message.error('当前作品已不存在');
         return;
       }
+      const currentOutline = project.outline ?? createEmptyFictionProjectOutline();
       const targetExists = target.kind === 'story'
         || (target.kind === 'volume'
-          ? fictionist.index.volumes[target.id]?.projectId === project.id
-          : fictionist.index.chapters[target.id]?.projectId === project.id);
+          ? Boolean(currentOutline.volumes[target.id])
+          : Boolean(currentOutline.chapters[target.id]));
       if (!targetExists) {
         message.error('所选大纲范围已不存在，请重新选择');
         return;
@@ -2466,15 +2790,16 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
         nodes: sourceCanvas.nodes.map((node) => {
           const data = node.data as AgentNodeData;
           if (data.gateType || typeof data.timerSeconds === 'number') return { ...node };
+          const contractedData = applyOutlineTaskRuntimeContract(data, operation);
           return {
             ...node,
             data: {
-              ...data,
-              modelRef: data.modelRef ?? selectedModelRef,
+              ...contractedData,
+              modelRef: contractedData.modelRef ?? selectedModelRef,
               capabilities: {
-                ...data.capabilities,
+                ...contractedData.capabilities,
                 input: {
-                  ...data.capabilities?.input,
+                  ...contractedData.capabilities?.input,
                   enabled: true,
                   includeSupplementalSources: true,
                 },
@@ -2667,6 +2992,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
         sourceRevision: payload.sourceRevision,
         targetChapterId: payload.targetChapterId,
         targetRevision: payload.targetRevision,
+        outlineChapterId: payload.outlineChapterId,
         title: reviewTitle,
         content: reviewDraft,
       });
@@ -2771,7 +3097,16 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
               <strong>{section === 'library' ? '作品分类' : section === 'chapters' ? '卷与章节' : section === 'outline' ? '大纲结构' : PROJECT_SECTION_ITEMS.find((item) => item.id === section)?.label}</strong>
               <small>{section === 'library' ? '按状态与分类查找' : section === 'outline' ? '总纲与卷章规划' : '项目内容导航'}</small>
             </span>
-            {section !== 'library' && section !== 'outline' ? (
+            {section === 'outline' ? (
+              <Button
+                type="text"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={openCreateOutlineVolume}
+              >
+                新建卷纲
+              </Button>
+            ) : section !== 'library' ? (
               <Tooltip title={section === 'chapters' ? '新建卷' : section === 'timeline' ? '新增事件' : '添加'}>
                 <Button
                   type="text"
@@ -3030,47 +3365,188 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
                 onClick={() => selectOutlineTarget({ kind: 'story' })}
               >
                 <PartitionOutlined />
-                <span><strong>故事总纲</strong><small>全书方向</small></span>
+                <span>
+                  <strong>故事总纲</strong>
+                  <small>
+                    全书方向
+                    {pendingOutlineTasksByTarget.get('story')?.length
+                      ? ` · 待确认 ${pendingOutlineTasksByTarget.get('story')?.length}`
+                      : ''}
+                  </small>
+                </span>
               </button>
-              {activeVolumes.map((volume) => {
+              {outlineDraft.volumeIds.map((volumeId, volumeIndex) => {
+                const outlineVolume = outlineDraft.volumes[volumeId];
+                if (!outlineVolume) return null;
                 const normalizedQuery = query.trim().toLocaleLowerCase();
-                const volumeMatches = volume.title.toLocaleLowerCase().includes(normalizedQuery);
-                const matchingChapters = volume.chapterIds.flatMap((chapterId) => {
-                  const chapter = index.chapters[chapterId];
-                  if (!chapter) return [];
+                const volumeMatches = outlineVolume.title.toLocaleLowerCase().includes(normalizedQuery);
+                const matchingChapters = outlineVolume.chapterIds.flatMap((chapterId) => {
+                  const outlineChapter = outlineDraft.chapters[chapterId];
+                  if (!outlineChapter) return [];
                   return !normalizedQuery
                     || volumeMatches
-                    || chapter.title.toLocaleLowerCase().includes(normalizedQuery)
-                    ? [chapter]
+                    || outlineChapter.title.toLocaleLowerCase().includes(normalizedQuery)
+                    ? [outlineChapter]
                     : [];
                 });
                 if (normalizedQuery && !volumeMatches && matchingChapters.length === 0) return null;
+                const volumePendingCount = pendingOutlineTasksByTarget.get(
+                  outlineTargetValue({ kind: 'volume', id: outlineVolume.id }),
+                )?.length ?? 0;
                 return (
-                  <section className="fictionist-outline-tree-group" key={volume.id}>
-                    <button
-                      type="button"
-                      className={`fictionist-outline-tree-item fictionist-outline-tree-item--volume${outlineTarget.kind === 'volume' && outlineTarget.id === volume.id ? ' is-active' : ''}`}
-                      onClick={() => selectOutlineTarget({ kind: 'volume', id: volume.id })}
-                    >
-                      <FolderOutlined />
-                      <span><strong>{volume.title}</strong><small>卷纲 · {volume.chapterIds.length} 章</small></span>
-                    </button>
+                  <section className="fictionist-outline-tree-group" key={outlineVolume.id}>
+                    <div className="fictionist-outline-tree-row">
+                      <button
+                        type="button"
+                        className={`fictionist-outline-tree-item fictionist-outline-tree-item--volume${outlineTarget.kind === 'volume' && outlineTarget.id === outlineVolume.id ? ' is-active' : ''}`}
+                        onClick={() => selectOutlineTarget({ kind: 'volume', id: outlineVolume.id })}
+                      >
+                        <FolderOutlined />
+                        <span>
+                          <strong>{outlineVolume.title}</strong>
+                          <small>
+                            {outlineVolume.chapterIds.length} 章纲 · {volumeOutlineIsFilled(outlineVolume) ? '已填写' : '未填写'}
+                            {outlineVolume.linkedVolumeId ? ' · 已关联' : ''}
+                            {volumePendingCount ? ` · 待确认 ${volumePendingCount}` : ''}
+                          </small>
+                        </span>
+                      </button>
+                      <Dropdown
+                        trigger={['click']}
+                        menu={{
+                          items: [
+                            { key: 'add', label: '新建章纲', icon: <PlusOutlined /> },
+                            { key: 'rename', label: '重命名卷纲', icon: <EditOutlined /> },
+                            {
+                              key: 'up', label: '上移卷纲', icon: <ArrowUpOutlined />,
+                              disabled: volumeIndex === 0,
+                            },
+                            {
+                              key: 'down', label: '下移卷纲', icon: <ArrowDownOutlined />,
+                              disabled: volumeIndex === outlineDraft.volumeIds.length - 1,
+                            },
+                            { type: 'divider' },
+                            { key: 'delete', label: '删除卷纲', icon: <DeleteOutlined />, danger: true },
+                          ],
+                          onClick: ({ key }) => {
+                            if (key === 'add') openCreateOutlineChapter(outlineVolume.id);
+                            else if (key === 'rename') openRenameOutlineVolume(outlineVolume);
+                            else if (key === 'up') moveOutlineVolume(outlineVolume.id, volumeIndex - 1);
+                            else if (key === 'down') moveOutlineVolume(outlineVolume.id, volumeIndex + 1);
+                            else if (key === 'delete') confirmDeleteOutlineVolume(outlineVolume);
+                          },
+                        }}
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          aria-label={`管理卷纲“${outlineVolume.title}”`}
+                          icon={<MoreOutlined />}
+                        />
+                      </Dropdown>
+                    </div>
                     <div className="fictionist-outline-tree-chapters">
-                      {matchingChapters.map((chapter) => (
-                        <button
-                          type="button"
-                          className={`fictionist-outline-tree-item fictionist-outline-tree-item--chapter${outlineTarget.kind === 'chapter' && outlineTarget.id === chapter.id ? ' is-active' : ''}`}
-                          key={chapter.id}
-                          onClick={() => selectOutlineTarget({ kind: 'chapter', id: chapter.id })}
-                        >
-                          <span className="fictionist-chapter-index">{String(chapterNumberById.get(chapter.id) ?? 0).padStart(2, '0')}</span>
-                          <span><strong>{chapter.title}</strong><small>章节纲要</small></span>
-                        </button>
-                      ))}
+                      {matchingChapters.map((outlineChapter) => {
+                        const chapterIndex = outlineVolume.chapterIds.indexOf(outlineChapter.id);
+                        const chapterPendingCount = pendingOutlineTasksByTarget.get(
+                          outlineTargetValue({ kind: 'chapter', id: outlineChapter.id }),
+                        )?.length ?? 0;
+                        return (
+                          <div className="fictionist-outline-tree-row" key={outlineChapter.id}>
+                            <button
+                              type="button"
+                              className={`fictionist-outline-tree-item fictionist-outline-tree-item--chapter${outlineTarget.kind === 'chapter' && outlineTarget.id === outlineChapter.id ? ' is-active' : ''}`}
+                              onClick={() => selectOutlineTarget({ kind: 'chapter', id: outlineChapter.id })}
+                            >
+                              <span className="fictionist-chapter-index">{String(outlineChapterNumberById.get(outlineChapter.id) ?? 0).padStart(2, '0')}</span>
+                              <span>
+                                <strong>{outlineChapter.title}</strong>
+                                <small>
+                                  {chapterOutlineIsFilled(outlineChapter) ? '已填写' : '未填写'}
+                                  {outlineChapter.linkedChapterId ? ' · 已关联' : ''}
+                                  {chapterPendingCount ? ` · 待确认 ${chapterPendingCount}` : ''}
+                                </small>
+                              </span>
+                            </button>
+                            <Dropdown
+                              trigger={['click']}
+                              menu={{
+                                items: [
+                                  outlineChapter.linkedChapterId
+                                    ? { key: 'open', label: '打开正文章节', icon: <ExportOutlined /> }
+                                    : { key: 'create', label: '从章纲创建章节', icon: <FileTextOutlined /> },
+                                  outlineChapter.linkedChapterId
+                                    ? { key: 'unlink', label: '解除正文关联', icon: <SwapOutlined /> }
+                                    : { key: 'link', label: '关联已有章节', icon: <SwapOutlined /> },
+                                  { key: 'rename', label: '重命名章纲', icon: <EditOutlined /> },
+                                  {
+                                    key: 'up', label: '上移章纲', icon: <ArrowUpOutlined />,
+                                    disabled: chapterIndex === 0,
+                                  },
+                                  {
+                                    key: 'down', label: '下移章纲', icon: <ArrowDownOutlined />,
+                                    disabled: chapterIndex === outlineVolume.chapterIds.length - 1,
+                                  },
+                                  {
+                                    key: 'move',
+                                    label: '移动到其他卷纲',
+                                    icon: <SwapOutlined />,
+                                    disabled: outlineVolumes.length <= 1,
+                                    children: outlineVolumes
+                                      .filter((target) => target.id !== outlineVolume.id)
+                                      .map((target) => ({ key: `move:${target.id}`, label: target.title })),
+                                  },
+                                  { type: 'divider' },
+                                  { key: 'delete', label: '删除章纲', icon: <DeleteOutlined />, danger: true },
+                                ],
+                                onClick: ({ key }) => {
+                                  if (key === 'create') void createManuscriptChapterFromOutline(outlineChapter.id);
+                                  else if (key === 'open' && outlineChapter.linkedChapterId) {
+                                    void openLinkedManuscriptChapter(outlineChapter.linkedChapterId);
+                                  } else if (key === 'link') {
+                                    setOutlineChapterLinkState({ outlineChapterId: outlineChapter.id });
+                                  } else if (key === 'unlink') unlinkOutlineChapter(outlineChapter.id);
+                                  else if (key === 'rename') openRenameOutlineChapter(outlineChapter);
+                                  else if (key === 'up') moveOutlineChapter(outlineChapter.id, outlineVolume.id, chapterIndex - 1);
+                                  else if (key === 'down') moveOutlineChapter(outlineChapter.id, outlineVolume.id, chapterIndex + 1);
+                                  else if (key.startsWith('move:')) {
+                                    const targetId = key.slice('move:'.length);
+                                    const target = outlineDraft.volumes[targetId];
+                                    if (target) moveOutlineChapter(outlineChapter.id, targetId, target.chapterIds.length);
+                                  } else if (key === 'delete') {
+                                    confirmDeleteOutlineChapter(outlineVolume, outlineChapter);
+                                  }
+                                },
+                              }}
+                            >
+                              <Button
+                                type="text"
+                                size="small"
+                                aria-label={`管理章纲“${outlineChapter.title}”`}
+                                icon={<MoreOutlined />}
+                              />
+                            </Dropdown>
+                          </div>
+                        );
+                      })}
                     </div>
                   </section>
                 );
               })}
+              {outlineVolumes.length === 0 ? (
+                <div className="fictionist-tree-empty fictionist-outline-tree-empty">
+                  <strong>还没有卷纲</strong>
+                  <small>先建立故事结构，再按章纲创建正文。</small>
+                  <Button size="small" icon={<PlusOutlined />} onClick={openCreateOutlineVolume}>新建卷纲</Button>
+                </div>
+              ) : null}
+              {query.trim() && outlineVolumes.length > 0
+                && !outlineVolumes.some((volume) => volume.title.toLocaleLowerCase()
+                  .includes(query.trim().toLocaleLowerCase())
+                  || volume.chapterIds.some((chapterId) => outlineDraft.chapters[chapterId]?.title
+                    .toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())))
+                ? <div className="fictionist-tree-empty">没有匹配的卷纲或章纲</div>
+                : null}
             </div>
           ) : section === 'canon' ? (
             <div className="fictionist-simple-list">
@@ -3283,7 +3759,7 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
               outline={outlineDraft}
               volume={outlineVolume}
               chapter={outlineChapter}
-              chapterNumber={outlineChapter ? chapterNumberById.get(outlineChapter.id) : undefined}
+              chapterNumber={outlineChapter ? outlineChapterNumberById.get(outlineChapter.id) : undefined}
               dirty={outlineDirty}
               saving={savingOutline}
               onStoryChange={updateStoryOutline}
@@ -3295,6 +3771,24 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
               hasPendingReview={Boolean(pendingOutlineTask)}
               onOpenPendingReview={() => {
                 if (pendingOutlineTask) openOutlineTaskReview(pendingOutlineTask);
+              }}
+              pendingReviews={currentPendingOutlineTasks.map((task) => ({
+                id: task.id,
+                label: `${task.taskLabel} · ${new Date(task.updatedAt).toLocaleString('zh-CN')}`,
+                onOpen: () => openOutlineTaskReview(task),
+              }))}
+              linkedChapterTitle={linkedManuscriptChapter?.title}
+              onCreateManuscriptChapter={() => {
+                if (outlineChapter) void createManuscriptChapterFromOutline(outlineChapter.id);
+              }}
+              onLinkManuscriptChapter={() => {
+                if (outlineChapter) setOutlineChapterLinkState({ outlineChapterId: outlineChapter.id });
+              }}
+              onOpenManuscriptChapter={() => {
+                if (linkedManuscriptChapter) void openLinkedManuscriptChapter(linkedManuscriptChapter.id);
+              }}
+              onUnlinkManuscriptChapter={() => {
+                if (outlineChapter) unlinkOutlineChapter(outlineChapter.id);
               }}
             />
           ) : section === 'canon' ? (
@@ -3785,13 +4279,27 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
         centered
         title={structureEditor?.kind === 'create-volume'
           ? '新建卷'
+          : structureEditor?.kind === 'create-outline-volume'
+            ? '新建卷纲'
+            : structureEditor?.kind === 'create-outline-chapter'
+              ? '新建章纲'
           : structureEditor?.kind === 'rename-volume'
             ? '重命名卷'
-            : '重命名章节'}
+            : structureEditor?.kind === 'rename-outline-volume'
+              ? '重命名卷纲'
+              : structureEditor?.kind === 'rename-outline-chapter'
+                ? '重命名章纲'
+                : '重命名章节'}
         open={Boolean(structureEditor)}
         onCancel={() => setStructureEditor(undefined)}
         onOk={() => void confirmStructureEdit()}
-        okText={structureEditor?.kind === 'create-volume' ? '创建卷' : '保存名称'}
+        okText={structureEditor?.kind === 'create-volume'
+          ? '创建卷'
+          : structureEditor?.kind === 'create-outline-volume'
+            ? '创建卷纲'
+            : structureEditor?.kind === 'create-outline-chapter'
+              ? '创建章纲'
+              : '保存名称'}
         cancelText="取消"
         confirmLoading={savingStructure}
         okButtonProps={{ disabled: !structureTitle.trim() }}
@@ -3799,13 +4307,56 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
       >
         <div className="fictionist-create-form">
           <label>
-            <span>{structureEditor?.kind === 'rename-chapter' ? '章节名称' : '卷名称'}</span>
+            <span>{structureEditor?.kind === 'rename-chapter'
+              ? '章节名称'
+              : structureEditor?.kind === 'create-outline-chapter'
+                || structureEditor?.kind === 'rename-outline-chapter'
+                ? '章纲名称'
+                : structureEditor?.kind === 'create-outline-volume'
+                  || structureEditor?.kind === 'rename-outline-volume'
+                  ? '卷纲名称'
+                  : '卷名称'}</span>
             <Input
               autoFocus
-              maxLength={structureEditor?.kind === 'rename-chapter' ? 80 : 40}
+              maxLength={structureEditor?.kind === 'rename-chapter'
+                || structureEditor?.kind === 'create-outline-chapter'
+                || structureEditor?.kind === 'rename-outline-chapter'
+                ? 80
+                : 40}
               value={structureTitle}
               onChange={(event) => setStructureTitle(event.target.value)}
               onPressEnter={() => void confirmStructureEdit()}
+            />
+          </label>
+        </div>
+      </Modal>
+
+      <Modal
+        centered
+        title={`关联正文章节${linkingOutlineChapter ? ` · ${linkingOutlineChapter.title}` : ''}`}
+        open={Boolean(outlineChapterLinkState)}
+        onCancel={() => setOutlineChapterLinkState(undefined)}
+        onOk={() => void confirmLinkOutlineChapter()}
+        okText="确认关联"
+        cancelText="取消"
+        okButtonProps={{ disabled: !outlineChapterLinkState?.chapterId }}
+        width={560}
+      >
+        <div className="fictionist-create-form">
+          <p className="fictionist-modal-copy">
+            关联时会将章纲标题和相对顺序复制到所选章节一次。关联完成后，章纲与正文可以分别修改；删除任意一方只会解除关联。
+          </p>
+          <label>
+            <span>正文章节</span>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder={manuscriptChapterLinkOptions.length > 0 ? '选择现有章节' : '没有可关联的章节'}
+              value={outlineChapterLinkState?.chapterId}
+              options={manuscriptChapterLinkOptions}
+              onChange={(chapterId) => setOutlineChapterLinkState((current) => current
+                ? { ...current, chapterId }
+                : current)}
             />
           </label>
         </div>
@@ -4012,6 +4563,19 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
               onChange={(event) => setContinuationGoal(event.target.value)}
             />
           </label>
+          <div className="fictionist-continuation-form__wide fictionist-outline-reference-control">
+            <span>
+              <strong>使用关联章纲</strong>
+              <small>{writingOutlineChapter
+                ? `引用“${writingOutlineChapter.title}”的规划内容`
+                : '当前写作目标没有可用的关联章纲'}</small>
+            </span>
+            <Switch
+              checked={useAssociatedOutline}
+              disabled={!writingOutlineChapter}
+              onChange={setUseAssociatedOutline}
+            />
+          </div>
           <div className="fictionist-continuation-form__wide fictionist-writing-requirements">
             <div className="fictionist-writing-requirements__header">
               <span>写作要求</span>
@@ -4066,12 +4630,15 @@ function FictionistWorkspace({ initialSection = 'library' }: { initialSection?: 
           <li><CheckCircleOutlined />作品名称、题材、目标章节名称和{writingMode === 'draft-current' ? '目标' : '来源'}章节修订号</li>
           <li><CheckCircleOutlined />当前章节{writingMode === 'draft-current' ? '为空，将作为写入目标' : `完整正文，共 ${countFictionWords(chapterContent).toLocaleString()} 字`}</li>
           <li><CheckCircleOutlined />上面填写的目标、预计字数和写作要求</li>
+          {useAssociatedOutline && writingOutlineChapter ? (
+            <li><CheckCircleOutlined />关联章纲“{writingOutlineChapter.title}”</li>
+          ) : null}
         </ul>
         <details className="fictionist-context-details">
           <summary>{writingMode === 'draft-current' ? '查看当前章节状态' : '查看将送入画布的当前正文'}</summary>
           <pre>{chapterContent || '（当前章节暂无正文）'}</pre>
         </details>
-        <p className="fictionist-modal-note">设定库内容已保存到本机；当前任务上下文仍按现有章节信息生成。</p>
+        <p className="fictionist-modal-note">设定库与时间线会随任务快照发送；章纲是否引用由上方开关决定。</p>
       </Modal>
 
       <Modal

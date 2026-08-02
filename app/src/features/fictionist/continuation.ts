@@ -32,6 +32,7 @@ export interface FictionistContinuationPayload extends Record<string, unknown> {
   sourceRevision: number;
   targetChapterId?: string;
   targetRevision?: number;
+  outlineChapterId?: string;
   proposedChapterTitle: string;
   targetWordCount: number;
 }
@@ -51,17 +52,24 @@ export interface ContinuationRequest {
   canonEntries?: FictionCanonEntry[];
   timelineEvents?: FictionTimelineEvent[];
   projectOutline?: FictionProjectOutline;
+  includeProjectOutline?: boolean;
+  outlineChapterId?: string;
 }
 
 const MAX_REFERENCE_CONTEXT_CHARS = 60_000;
 
 function boundedReferenceContext(request: ContinuationRequest): string[] {
   const sections: string[] = [];
-  const outline = request.projectOutline;
+  const outline = request.includeProjectOutline === false ? undefined : request.projectOutline;
   if (outline) {
     const targetChapterId = request.targetChapter?.id ?? request.chapter.id;
-    const chapterOutline = outline.chapters[targetChapterId]
-      ?? outline.chapters[request.chapter.id];
+    const chapterOutline = request.outlineChapterId
+      ? outline.chapters[request.outlineChapterId]
+      : Object.values(outline.chapters).find(
+          (item) => item.linkedChapterId === targetChapterId,
+        ) ?? Object.values(outline.chapters).find(
+          (item) => item.linkedChapterId === request.chapter.id,
+        );
     sections.push([
       '## 已保存大纲',
       '',
@@ -160,6 +168,9 @@ export function continuationPayload(request: ContinuationRequest): FictionistCon
     sourceRevision: request.chapter.revision,
     targetChapterId: targetChapter?.id,
     targetRevision: targetChapter?.revision,
+    outlineChapterId: request.includeProjectOutline === false
+      ? undefined
+      : request.outlineChapterId,
     proposedChapterTitle: request.proposedChapterTitle?.trim()
       || targetChapter?.title
       || '未命名章节',
@@ -181,6 +192,7 @@ export function isFictionistContinuationPayload(
     && typeof value.sourceRevision === 'number'
     && (value.targetChapterId === undefined || typeof value.targetChapterId === 'string')
     && (value.targetRevision === undefined || typeof value.targetRevision === 'number')
+    && (value.outlineChapterId === undefined || typeof value.outlineChapterId === 'string')
     && typeof value.proposedChapterTitle === 'string'
     && typeof value.targetWordCount === 'number';
 }

@@ -209,6 +209,7 @@ describe('fictionist store', () => {
       protagonistGoal: '找到寄信人',
       coreConflict: '港区势力阻止调查',
       endingDirection: '公开沉船记录',
+      volumeIds: [],
       volumes: {},
       chapters: {},
     })).toBe(true);
@@ -217,6 +218,49 @@ describe('fictionist store', () => {
       .toBe('记者收到一封来自失踪船只的信。');
     expect((await repository.loadOrInitialize()).projects['mist-harbor'].outline?.theme)
       .toBe('真相的代价');
+  });
+
+  it('creates and links manuscript chapters through outline actions', async () => {
+    const { store } = setup(storage);
+    await store.getState().hydrate();
+    const outlineInput = {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumeIds: ['outline-volume-store'],
+      volumes: {
+        'outline-volume-store': {
+          id: 'outline-volume-store', title: '新卷纲',
+          chapterIds: ['outline-chapter-create', 'outline-chapter-link'],
+          summary: '', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'outline-chapter-create': {
+          id: 'outline-chapter-create', title: '从章纲生成',
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+        'outline-chapter-link': {
+          id: 'outline-chapter-link', title: '关联既有正文',
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+      },
+    };
+    expect(await store.getState().saveProjectOutline('mist-harbor', outlineInput)).toBe(true);
+
+    expect(await store.getState().linkOutlineChapter('outline-chapter-link', 'chapter-3')).toBe(true);
+    const createdChapterId = await store.getState().createChapterFromOutline('outline-chapter-create');
+
+    expect(createdChapterId).toBeTruthy();
+    expect(store.getState()).toMatchObject({
+      activeProjectId: 'mist-harbor',
+      activeChapterId: createdChapterId,
+      chapterContent: '',
+      dirty: false,
+    });
+    expect(store.getState().index.chapters[createdChapterId ?? '']?.title).toBe('从章纲生成');
+
+    expect(store.getState().index.projects['mist-harbor'].outline
+      ?.chapters['outline-chapter-link'].linkedChapterId).toBe('chapter-3');
+    expect(store.getState().index.chapters['chapter-3'].title).toBe('关联既有正文');
   });
 
   it('marks edits dirty and clears them only after a successful save', async () => {
@@ -379,6 +423,96 @@ describe('fictionist store', () => {
     expect(store.getState().activeChapterId).toBe(created?.id);
     expect(await repository.readChapter(source.id)).toBe(sourceBody);
     expect(await repository.readChapter(created?.id ?? '')).toBe('这是新的下一章。');
+  });
+
+  it('links a newly accepted continuation to the selected next chapter outline', async () => {
+    const { store } = setup(storage);
+    await store.getState().hydrate();
+    const source = store.getState().index.chapters['chapter-4'];
+    expect(await store.getState().saveProjectOutline('mist-harbor', {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumeIds: ['outline-volume-writing'],
+      volumes: {
+        'outline-volume-writing': {
+          id: 'outline-volume-writing', title: '第一卷纲',
+          chapterIds: ['outline-source', 'outline-next'],
+          linkedVolumeId: source.volumeId,
+          summary: '', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'outline-source': {
+          id: 'outline-source', title: source.title, linkedChapterId: source.id,
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+        'outline-next': {
+          id: 'outline-next', title: '章纲中的标题',
+          summary: '', objective: '推进钟塔冲突', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+      },
+    })).toBe(true);
+
+    const result = await store.getState().acceptContinuationDraft({
+      taskId: 'task-outline-next',
+      projectId: source.projectId,
+      sourceChapterId: source.id,
+      sourceRevision: source.revision,
+      outlineChapterId: 'outline-next',
+      title: '用户确认后的标题',
+      content: '钟塔里的齿轮开始倒转。',
+    });
+
+    expect(result.ok).toBe(true);
+    const chapterId = result.ok ? result.chapterId : '';
+    expect(store.getState().index.projects['mist-harbor'].outline
+      ?.chapters['outline-next'].linkedChapterId).toBe(chapterId);
+    expect(store.getState().index.chapters[chapterId].title).toBe('用户确认后的标题');
+  });
+
+  it('links an accepted empty placeholder chapter to the selected chapter outline', async () => {
+    const { store } = setup(storage);
+    await store.getState().hydrate();
+    const source = store.getState().index.chapters['chapter-3'];
+    const target = store.getState().index.chapters['chapter-4'];
+    expect(await store.getState().saveProjectOutline('mist-harbor', {
+      premise: '', theme: '', protagonistGoal: '', coreConflict: '', endingDirection: '', details: '',
+      volumeIds: ['outline-volume-placeholder'],
+      volumes: {
+        'outline-volume-placeholder': {
+          id: 'outline-volume-placeholder', title: '第一卷纲',
+          chapterIds: ['outline-source-placeholder', 'outline-target-placeholder'],
+          linkedVolumeId: source.volumeId,
+          summary: '', objective: '', turningPoint: '', climax: '', details: '',
+        },
+      },
+      chapters: {
+        'outline-source-placeholder': {
+          id: 'outline-source-placeholder', title: source.title, linkedChapterId: source.id,
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+        'outline-target-placeholder': {
+          id: 'outline-target-placeholder', title: '占位章纲',
+          summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+        },
+      },
+    })).toBe(true);
+
+    const result = await store.getState().acceptContinuationDraft({
+      taskId: 'task-outline-placeholder',
+      projectId: source.projectId,
+      sourceChapterId: source.id,
+      sourceRevision: source.revision,
+      targetChapterId: target.id,
+      targetRevision: target.revision,
+      outlineChapterId: 'outline-target-placeholder',
+      title: '用户确认占位标题',
+      content: '占位章节现在有了正文。',
+    });
+
+    expect(result).toEqual({ ok: true, chapterId: target.id });
+    expect(store.getState().index.projects['mist-harbor'].outline
+      ?.chapters['outline-target-placeholder'].linkedChapterId).toBe(target.id);
+    expect(store.getState().index.chapters[target.id].title).toBe('用户确认占位标题');
   });
 
   it('fills an unchanged empty chapter when accepting a current-chapter draft', async () => {

@@ -62,6 +62,8 @@ export interface FictionistState {
     projectId: string,
     input: UpdateProjectOutlineInput,
   ) => Promise<boolean>;
+  createChapterFromOutline: (outlineChapterId: string) => Promise<string | null>;
+  linkOutlineChapter: (outlineChapterId: string, chapterId: string) => Promise<boolean>;
   renameProject: (projectId: string, title: string) => Promise<boolean>;
   deleteProject: (projectId: string) => Promise<boolean>;
   createVolume: (title?: string) => Promise<string | null>;
@@ -97,6 +99,7 @@ export interface AcceptContinuationDraftInput {
   sourceRevision: number;
   targetChapterId?: string;
   targetRevision?: number;
+  outlineChapterId?: string;
   title: string;
   content: string;
 }
@@ -327,6 +330,57 @@ export function createFictionistState(
       try {
         const index = await repository.updateProjectOutline(get().index, projectId, input);
         set({ index, errorMessage: null });
+        return true;
+      } catch (reason) {
+        set({ errorMessage: readableError(reason) });
+        return false;
+      }
+    },
+
+    createChapterFromOutline: async (outlineChapterId) => {
+      if (get().dirty && !(await get().saveCurrentChapter())) return null;
+      const { activeProjectId, index } = get();
+      if (!activeProjectId) {
+        set({ errorMessage: '请先选择作品' });
+        return null;
+      }
+      try {
+        const result = await repository.createChapterFromOutline(index, {
+          projectId: activeProjectId,
+          outlineChapterId,
+        });
+        const content = await repository.readChapter(result.chapter.id);
+        set({
+          index: result.index,
+          activeProjectId,
+          activeChapterId: result.chapter.id,
+          chapterContent: content,
+          savedChapterContent: content,
+          dirty: false,
+          saveState: result.created ? 'saved' : 'idle',
+          errorMessage: null,
+        });
+        return result.chapter.id;
+      } catch (reason) {
+        set({ errorMessage: readableError(reason) });
+        return null;
+      }
+    },
+
+    linkOutlineChapter: async (outlineChapterId, chapterId) => {
+      if (get().dirty && !(await get().saveCurrentChapter())) return false;
+      const { activeProjectId, index } = get();
+      if (!activeProjectId) {
+        set({ errorMessage: '请先选择作品' });
+        return false;
+      }
+      try {
+        const updated = await repository.linkOutlineChapter(index, {
+          projectId: activeProjectId,
+          outlineChapterId,
+          chapterId,
+        });
+        set({ index: updated, errorMessage: null });
         return true;
       } catch (reason) {
         set({ errorMessage: readableError(reason) });
@@ -769,6 +823,7 @@ export function createFictionistState(
         try {
           const updated = await repository.acceptChapterDraft(index, {
             chapterId: source.id,
+            outlineChapterId: input.outlineChapterId,
             title: input.title,
             content: input.content,
             sourceTaskId: input.taskId,
@@ -825,6 +880,7 @@ export function createFictionistState(
           ? {
               index: await repository.acceptChapterDraft(index, {
                 chapterId: input.targetChapterId,
+                outlineChapterId: input.outlineChapterId,
                 title: input.title,
                 content: input.content,
                 sourceTaskId: input.taskId,
@@ -834,6 +890,7 @@ export function createFictionistState(
           : await repository.createChapter(index, {
               projectId: input.projectId,
               volumeId: source.volumeId,
+              outlineChapterId: input.outlineChapterId,
               title: input.title,
               content: input.content,
               sourceTaskId: input.taskId,

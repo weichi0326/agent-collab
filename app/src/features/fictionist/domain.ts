@@ -1,4 +1,4 @@
-export const FICTIONIST_SCHEMA_VERSION = 1 as const;
+export const FICTIONIST_SCHEMA_VERSION = 2 as const;
 
 export type FictionProjectStatus = 'drafting' | 'paused' | 'archived';
 export type FictionChapterStatus = 'outline' | 'draft' | 'revised' | 'final';
@@ -65,9 +65,23 @@ export interface FictionChapterOutline {
   details?: string;
 }
 
+export interface FictionOutlineVolume extends FictionVolumeOutline {
+  id: string;
+  title: string;
+  chapterIds: string[];
+  linkedVolumeId?: string;
+}
+
+export interface FictionOutlineChapter extends FictionChapterOutline {
+  id: string;
+  title: string;
+  linkedChapterId?: string;
+}
+
 export interface FictionProjectOutline extends FictionStoryOutline {
-  volumes: Record<string, FictionVolumeOutline>;
-  chapters: Record<string, FictionChapterOutline>;
+  volumeIds: string[];
+  volumes: Record<string, FictionOutlineVolume>;
+  chapters: Record<string, FictionOutlineChapter>;
   updatedAt: string;
 }
 
@@ -142,6 +156,7 @@ export function createEmptyFictionProjectOutline(): FictionProjectOutline {
     coreConflict: '',
     endingDirection: '',
     details: '',
+    volumeIds: [],
     volumes: {},
     chapters: {},
     updatedAt: '',

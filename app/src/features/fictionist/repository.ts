@@ -10,8 +10,11 @@ import {
   chapterAfterDeletion,
   chaptersForProject,
   countFictionWords,
+  createEmptyFictionChapterOutline,
+  createEmptyFictionVolumeOutline,
   isSafeFictionistId,
   type FictionChapter,
+  type FictionChapterOutline,
   type FictionChapterStatus,
   type FictionCanonEntry,
   type FictionCanonEntryType,
@@ -21,6 +24,7 @@ import {
   type FictionProjectOutline,
   type FictionProjectStatus,
   type FictionVolume,
+  type FictionVolumeOutline,
 } from './domain';
 import { createDemoFictionistData } from './fixtures';
 
@@ -103,6 +107,7 @@ export type UpdateProjectOutlineInput = Omit<FictionProjectOutline, 'updatedAt'>
 export interface CreateChapterInput {
   projectId: string;
   volumeId?: string;
+  outlineChapterId?: string;
   title?: string;
   content?: string;
   sourceTaskId?: string;
@@ -111,6 +116,19 @@ export interface CreateChapterInput {
 export interface CreateChapterResult {
   index: FictionistIndex;
   chapter: FictionChapter;
+}
+
+export interface CreateChapterFromOutlineInput {
+  projectId: string;
+  outlineChapterId: string;
+}
+
+export interface CreateChapterFromOutlineResult extends CreateChapterResult {
+  created: boolean;
+}
+
+export interface LinkOutlineChapterInput extends CreateChapterFromOutlineInput {
+  chapterId: string;
 }
 
 export interface CreateVolumeInput {
@@ -164,6 +182,7 @@ export interface ReplaceProjectTextResult {
 
 export interface AcceptChapterDraftInput {
   chapterId: string;
+  outlineChapterId?: string;
   title: string;
   content: string;
   sourceTaskId: string;
@@ -190,15 +209,96 @@ function assertSafeId(id: string, label: string): void {
   if (!isSafeFictionistId(id)) throw new Error(`${label}不是安全的 ASCII ID`);
 }
 
+interface LegacyProjectOutline {
+  premise?: string;
+  theme?: string;
+  protagonistGoal?: string;
+  coreConflict?: string;
+  endingDirection?: string;
+  details?: string;
+  volumes?: Record<string, FictionVolumeOutline>;
+  chapters?: Record<string, FictionChapterOutline>;
+  updatedAt?: string;
+}
+
+function migrateLegacyOutline(
+  outline: LegacyProjectOutline | FictionProjectOutline | undefined,
+  project: FictionistIndex['projects'][string],
+  volumes: FictionistIndex['volumes'],
+  chapters: FictionistIndex['chapters'],
+): FictionProjectOutline | undefined {
+  if (!outline) return undefined;
+  if ('volumeIds' in outline && Array.isArray(outline.volumeIds)) {
+    return outline as FictionProjectOutline;
+  }
+  const legacyVolumes = outline.volumes ?? {};
+  const legacyChapters = outline.chapters ?? {};
+  const outlineVolumes: FictionProjectOutline['volumes'] = {};
+  const outlineChapters: FictionProjectOutline['chapters'] = {};
+  const volumeIds: string[] = [];
+  for (const volumeId of project.volumeIds) {
+    const volume = volumes[volumeId];
+    if (!volume) continue;
+    const chapterIds = volume.chapterIds.filter((chapterId) => Boolean(legacyChapters[chapterId]));
+    const volumeFields = legacyVolumes[volumeId];
+    if (!volumeFields && chapterIds.length === 0) continue;
+    volumeIds.push(volumeId);
+    outlineVolumes[volumeId] = {
+      id: volumeId,
+      title: volume.title,
+      chapterIds,
+      linkedVolumeId: volumeId,
+      ...createEmptyFictionVolumeOutline(),
+      ...volumeFields,
+    };
+    for (const chapterId of chapterIds) {
+      const chapter = chapters[chapterId];
+      if (!chapter) continue;
+      outlineChapters[chapterId] = {
+        id: chapterId,
+        title: chapter.title,
+        linkedChapterId: chapterId,
+        ...createEmptyFictionChapterOutline(),
+        ...legacyChapters[chapterId],
+      };
+    }
+  }
+  return {
+    premise: outline.premise ?? '',
+    theme: outline.theme ?? '',
+    protagonistGoal: outline.protagonistGoal ?? '',
+    coreConflict: outline.coreConflict ?? '',
+    endingDirection: outline.endingDirection ?? '',
+    details: outline.details ?? '',
+    volumeIds,
+    volumes: outlineVolumes,
+    chapters: outlineChapters,
+    updatedAt: outline.updatedAt ?? '',
+  };
+}
+
 function parseIndex(raw: string): FictionistIndex {
-  const parsed = JSON.parse(raw) as Partial<FictionistIndex>;
-  if (parsed.schemaVersion !== FICTIONIST_SCHEMA_VERSION) {
+  const parsed = JSON.parse(raw) as Omit<Partial<FictionistIndex>, 'schemaVersion'> & {
+    schemaVersion?: number;
+  };
+  if (parsed.schemaVersion !== 1 && parsed.schemaVersion !== FICTIONIST_SCHEMA_VERSION) {
     throw new Error(`不支持的小说索引版本：${String(parsed.schemaVersion)}`);
   }
   if (!parsed.projects || !parsed.volumes || !parsed.chapters) {
     throw new Error('小说索引缺少必要数据');
   }
-  const projectsData = parsed.projects;
+  const projectsData = Object.fromEntries(Object.entries(parsed.projects).map(([projectId, project]) => [
+    projectId,
+    {
+      ...project,
+      outline: migrateLegacyOutline(
+        project.outline as LegacyProjectOutline | FictionProjectOutline | undefined,
+        project,
+        parsed.volumes!,
+        parsed.chapters!,
+      ),
+    },
+  ]));
   const existingCanonEntries = parsed.canonEntries ?? {};
   const shouldMigrateDemoCanon = Object.keys(existingCanonEntries).length === 0
     && (projectsData['mist-harbor']?.canonEntryCount ?? 0) > 0;
@@ -219,6 +319,7 @@ function parseIndex(raw: string): FictionistIndex {
     : projectsData;
   return {
     ...parsed,
+    schemaVersion: FICTIONIST_SCHEMA_VERSION,
     projects,
     canonEntries: legacyCanonEntries,
     timelineEvents: parsed.timelineEvents ?? {},
@@ -355,29 +456,49 @@ function normalizeProjectOutline(
   if (!project) throw new Error('作品不存在');
   const volumes: FictionProjectOutline['volumes'] = {};
   const chapters: FictionProjectOutline['chapters'] = {};
-  for (const volumeId of project.volumeIds) {
-    const volume = index.volumes[volumeId];
-    if (!volume || volume.projectId !== projectId) continue;
+  const volumeIds = [...new Set(input.volumeIds ?? [])];
+  const linkedVolumeIds = new Set<string>();
+  const linkedChapterIds = new Set<string>();
+  for (const volumeId of volumeIds) {
+    assertSafeId(volumeId, '卷纲 ID');
     const volumeInput = input.volumes?.[volumeId];
-    if (volumeInput) {
-      volumes[volumeId] = {
-        summary: normalizeOutlineField(volumeInput.summary, '本卷概述'),
-        objective: normalizeOutlineField(volumeInput.objective, '本卷目标'),
-        turningPoint: normalizeOutlineField(volumeInput.turningPoint, '关键转折'),
-        climax: normalizeOutlineField(volumeInput.climax, '高潮与收束'),
-        details: normalizeOutlineField(
-          volumeInput.details,
-          '本卷详细大纲',
-          MAX_OUTLINE_DETAILS_CHARS,
-        ),
-      };
-    }
-    for (const chapterId of volume.chapterIds) {
-      const chapter = index.chapters[chapterId];
-      if (!chapter || chapter.projectId !== projectId || chapter.volumeId !== volumeId) continue;
+    if (!volumeInput || volumeInput.id !== volumeId) throw new Error('卷纲结构无效');
+    const chapterIds = [...new Set(volumeInput.chapterIds ?? [])];
+    const linkedVolume = volumeInput.linkedVolumeId
+      ? index.volumes[volumeInput.linkedVolumeId]
+      : undefined;
+    const linkedVolumeId = linkedVolume?.projectId === projectId
+      && !linkedVolumeIds.has(linkedVolume.id)
+      ? linkedVolume.id
+      : undefined;
+    if (linkedVolumeId) linkedVolumeIds.add(linkedVolumeId);
+    volumes[volumeId] = {
+      id: volumeId,
+      title: normalizeText(volumeInput.title, 40, '卷纲名称'),
+      chapterIds,
+      ...(linkedVolumeId ? { linkedVolumeId } : {}),
+      summary: normalizeOutlineField(volumeInput.summary, '本卷概述'),
+      objective: normalizeOutlineField(volumeInput.objective, '本卷目标'),
+      turningPoint: normalizeOutlineField(volumeInput.turningPoint, '关键转折'),
+      climax: normalizeOutlineField(volumeInput.climax, '高潮与收束'),
+      details: normalizeOutlineField(volumeInput.details, '本卷详细大纲', MAX_OUTLINE_DETAILS_CHARS),
+    };
+    for (const chapterId of chapterIds) {
+      assertSafeId(chapterId, '章纲 ID');
       const chapterInput = input.chapters?.[chapterId];
-      if (!chapterInput) continue;
+      if (!chapterInput || chapterInput.id !== chapterId) throw new Error('章纲结构无效');
+      const linkedChapter = chapterInput.linkedChapterId
+        ? index.chapters[chapterInput.linkedChapterId]
+        : undefined;
+      const linkedChapterId = linkedChapter?.projectId === projectId
+        && !linkedChapterIds.has(linkedChapter.id)
+        ? linkedChapter.id
+        : undefined;
+      if (linkedChapterId) linkedChapterIds.add(linkedChapterId);
       chapters[chapterId] = {
+        id: chapterId,
+        title: normalizeText(chapterInput.title, 80, '章纲名称'),
+        ...(linkedChapterId ? { linkedChapterId } : {}),
         summary: normalizeOutlineField(chapterInput.summary, '本章概述'),
         objective: normalizeOutlineField(chapterInput.objective, '本章目标'),
         pointOfView: normalizeOutlineField(chapterInput.pointOfView, '视角人物'),
@@ -385,11 +506,7 @@ function normalizeProjectOutline(
         keyEvents: normalizeOutlineField(chapterInput.keyEvents, '关键事件'),
         clues: normalizeOutlineField(chapterInput.clues, '线索与伏笔'),
         hook: normalizeOutlineField(chapterInput.hook, '结尾钩子'),
-        details: normalizeOutlineField(
-          chapterInput.details,
-          '本章详细大纲',
-          MAX_OUTLINE_DETAILS_CHARS,
-        ),
+        details: normalizeOutlineField(chapterInput.details, '本章详细大纲', MAX_OUTLINE_DETAILS_CHARS),
       };
     }
   }
@@ -404,6 +521,7 @@ function normalizeProjectOutline(
       '全书详细大纲',
       MAX_OUTLINE_DETAILS_CHARS,
     ),
+    volumeIds,
     volumes,
     chapters,
     updatedAt,
@@ -631,6 +749,179 @@ export function createFictionistRepository(
           timestamp,
         );
         updated.projects[projectId].updatedAt = timestamp;
+        updated.updatedAt = timestamp;
+        await writeIndex(updated);
+        return updated;
+      });
+    },
+
+    async createChapterFromOutline(
+      index: FictionistIndex,
+      input: CreateChapterFromOutlineInput,
+    ): Promise<CreateChapterFromOutlineResult> {
+      return mutate(index, async (index) => {
+        const project = index.projects[input.projectId];
+        const outline = project?.outline;
+        const outlineChapter = outline?.chapters[input.outlineChapterId];
+        const outlineVolume = outline && Object.values(outline.volumes).find(
+          (volume) => volume.chapterIds.includes(input.outlineChapterId),
+        );
+        if (!project || !outline || !outlineChapter || !outlineVolume) {
+          throw new Error('章纲不存在');
+        }
+        const existingChapter = outlineChapter.linkedChapterId
+          ? index.chapters[outlineChapter.linkedChapterId]
+          : undefined;
+        if (existingChapter?.projectId === project.id) {
+          return { index, chapter: existingChapter, created: false };
+        }
+
+        const timestamp = now();
+        const updated = cloneIndex(index);
+        const updatedProject = updated.projects[project.id];
+        const updatedOutline = updatedProject.outline!;
+        const updatedOutlineVolume = updatedOutline.volumes[outlineVolume.id];
+        let volume = outlineVolume.linkedVolumeId
+          ? updated.volumes[outlineVolume.linkedVolumeId]
+          : undefined;
+        if (!volume || volume.projectId !== project.id) {
+          const outlineVolumeIndex = outline.volumeIds.indexOf(outlineVolume.id);
+          const usedVolumeIds = new Set(Object.values(updatedOutline.volumes)
+            .flatMap((item) => item.id !== outlineVolume.id && item.linkedVolumeId
+              ? [item.linkedVolumeId]
+              : []));
+          volume = updatedProject.volumeIds
+            .map((volumeId) => updated.volumes[volumeId])
+            .find((item) => item && item.chapterIds.length === 0 && !usedVolumeIds.has(item.id));
+          if (volume) {
+            volume.title = normalizeText(outlineVolume.title, 40, '卷名称');
+            const currentVolumeIndex = updatedProject.volumeIds.indexOf(volume.id);
+            updatedProject.volumeIds.splice(currentVolumeIndex, 1);
+            updatedProject.volumeIds.splice(
+              Math.max(0, Math.min(outlineVolumeIndex, updatedProject.volumeIds.length)),
+              0,
+              volume.id,
+            );
+          } else {
+            const volumeId = createId('volume');
+            assertSafeId(volumeId, '卷 ID');
+            if (updated.volumes[volumeId]) throw new Error('生成的卷 ID 已存在');
+            volume = {
+              id: volumeId,
+              projectId: project.id,
+              title: normalizeText(outlineVolume.title, 40, '卷名称'),
+              chapterIds: [],
+            };
+            updated.volumes[volumeId] = volume;
+            updatedProject.volumeIds.splice(
+              Math.max(0, Math.min(outlineVolumeIndex, updatedProject.volumeIds.length)),
+              0,
+              volumeId,
+            );
+          }
+          updatedOutlineVolume.linkedVolumeId = volume.id;
+        }
+
+        const chapterId = createId('chapter');
+        assertSafeId(chapterId, '章节 ID');
+        if (updated.chapters[chapterId]) throw new Error('生成的章节 ID 已存在');
+        const chapter: FictionChapter = {
+          id: chapterId,
+          projectId: project.id,
+          volumeId: volume.id,
+          title: normalizeText(outlineChapter.title, 80, '章节名称'),
+          status: 'outline',
+          wordCount: 0,
+          revision: 0,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        const outlinePosition = outlineVolume.chapterIds.indexOf(outlineChapter.id);
+        const nextLinkedId = outlineVolume.chapterIds.slice(outlinePosition + 1)
+          .map((id) => updatedOutline.chapters[id]?.linkedChapterId)
+          .find((id) => id && volume.chapterIds.includes(id));
+        const previousLinkedId = [...outlineVolume.chapterIds.slice(0, outlinePosition)]
+          .reverse()
+          .map((id) => updatedOutline.chapters[id]?.linkedChapterId)
+          .find((id) => id && volume.chapterIds.includes(id));
+        const targetIndex = nextLinkedId
+          ? volume.chapterIds.indexOf(nextLinkedId)
+          : previousLinkedId
+            ? volume.chapterIds.indexOf(previousLinkedId) + 1
+            : Math.min(outlinePosition, volume.chapterIds.length);
+        volume.chapterIds.splice(targetIndex, 0, chapterId);
+        updated.chapters[chapterId] = chapter;
+        updatedOutline.chapters[outlineChapter.id].linkedChapterId = chapterId;
+        updatedOutline.updatedAt = timestamp;
+        updatedProject.updatedAt = timestamp;
+        updated.activeProjectId = project.id;
+        updated.activeChapterId = chapterId;
+        updated.updatedAt = timestamp;
+        await commitChapter(updated, chapterId, '');
+        return { index: updated, chapter, created: true };
+      });
+    },
+
+    async linkOutlineChapter(
+      index: FictionistIndex,
+      input: LinkOutlineChapterInput,
+    ): Promise<FictionistIndex> {
+      return mutate(index, async (index) => {
+        const project = index.projects[input.projectId];
+        const outline = project?.outline;
+        const outlineChapter = outline?.chapters[input.outlineChapterId];
+        const outlineVolume = outline && Object.values(outline.volumes).find(
+          (volume) => volume.chapterIds.includes(input.outlineChapterId),
+        );
+        const chapter = index.chapters[input.chapterId];
+        if (!project || !outline || !outlineChapter || !outlineVolume) {
+          throw new Error('章纲不存在');
+        }
+        if (!chapter || chapter.projectId !== project.id) throw new Error('正文章节不存在');
+        const duplicate = Object.values(outline.chapters).find(
+          (item) => item.id !== outlineChapter.id && item.linkedChapterId === chapter.id,
+        );
+        if (duplicate) throw new Error('该正文章节已关联其他章纲');
+        const linkedSiblingInAnotherVolume = outlineVolume.chapterIds
+          .map((id) => outline.chapters[id]?.linkedChapterId)
+          .map((id) => id ? index.chapters[id] : undefined)
+          .some((item) => item && item.volumeId !== chapter.volumeId);
+        if (linkedSiblingInAnotherVolume) throw new Error('同一卷纲不能关联多个正文卷');
+        const duplicateVolume = Object.values(outline.volumes).find(
+          (item) => item.id !== outlineVolume.id && item.linkedVolumeId === chapter.volumeId,
+        );
+        if (duplicateVolume) throw new Error('该正文卷已关联其他卷纲');
+
+        const timestamp = now();
+        const updated = cloneIndex(index);
+        const updatedOutline = updated.projects[project.id].outline!;
+        const updatedVolume = updated.volumes[chapter.volumeId];
+        const currentPosition = updatedVolume.chapterIds.indexOf(chapter.id);
+        updatedVolume.chapterIds.splice(currentPosition, 1);
+        const outlinePosition = outlineVolume.chapterIds.indexOf(outlineChapter.id);
+        const nextLinkedId = outlineVolume.chapterIds.slice(outlinePosition + 1)
+          .map((id) => updatedOutline.chapters[id]?.linkedChapterId)
+          .find((id) => id && updatedVolume.chapterIds.includes(id));
+        const previousLinkedId = [...outlineVolume.chapterIds.slice(0, outlinePosition)]
+          .reverse()
+          .map((id) => updatedOutline.chapters[id]?.linkedChapterId)
+          .find((id) => id && updatedVolume.chapterIds.includes(id));
+        const targetIndex = nextLinkedId
+          ? updatedVolume.chapterIds.indexOf(nextLinkedId)
+          : previousLinkedId
+            ? updatedVolume.chapterIds.indexOf(previousLinkedId) + 1
+            : Math.min(outlinePosition, updatedVolume.chapterIds.length);
+        updatedVolume.chapterIds.splice(targetIndex, 0, chapter.id);
+        updated.chapters[chapter.id] = {
+          ...chapter,
+          title: normalizeText(outlineChapter.title, 80, '章节名称'),
+          revision: chapter.title === outlineChapter.title ? chapter.revision : chapter.revision + 1,
+          updatedAt: timestamp,
+        };
+        updatedOutline.volumes[outlineVolume.id].linkedVolumeId = chapter.volumeId;
+        updatedOutline.chapters[outlineChapter.id].linkedChapterId = chapter.id;
+        updatedOutline.updatedAt = timestamp;
+        updated.projects[project.id].updatedAt = timestamp;
         updated.updatedAt = timestamp;
         await writeIndex(updated);
         return updated;
@@ -1047,8 +1338,15 @@ export function createFictionistRepository(
         for (const chapterId of deletedChapterIds) delete updated.chapters[chapterId];
         const outline = updated.projects[project.id].outline;
         if (outline) {
-          delete outline.volumes[volumeId];
-          for (const chapterId of deletedChapterIds) delete outline.chapters[chapterId];
+          for (const outlineVolume of Object.values(outline.volumes)) {
+            if (outlineVolume.linkedVolumeId === volumeId) delete outlineVolume.linkedVolumeId;
+          }
+          for (const outlineChapter of Object.values(outline.chapters)) {
+            if (outlineChapter.linkedChapterId
+              && deletedChapterIdSet.has(outlineChapter.linkedChapterId)) {
+              delete outlineChapter.linkedChapterId;
+            }
+          }
           outline.updatedAt = timestamp;
         }
         updated.projects[project.id].updatedAt = timestamp;
@@ -1080,6 +1378,23 @@ export function createFictionistRepository(
         if (!project.volumeIds.includes(volumeId) || !volume || volume.projectId !== project.id) {
           throw new Error('作品缺少可用卷');
         }
+        const outline = project.outline;
+        const outlineChapterId = input.outlineChapterId;
+        const outlineChapter = outlineChapterId
+          ? outline?.chapters[outlineChapterId]
+          : undefined;
+        const outlineVolume = outlineChapterId && outline
+          ? Object.values(outline.volumes).find(
+              (item) => item.chapterIds.includes(outlineChapterId),
+            )
+          : undefined;
+        if (outlineChapterId && (!outlineChapter || !outlineVolume)) {
+          throw new Error('关联的章纲不存在');
+        }
+        if (outlineChapter?.linkedChapterId) throw new Error('章纲已经关联正文章节');
+        if (outlineVolume?.linkedVolumeId && outlineVolume.linkedVolumeId !== volume.id) {
+          throw new Error('章纲所属卷纲已关联其他正文卷');
+        }
         const chapterId = createId('chapter');
         assertSafeId(chapterId, '章节 ID');
         if (index.chapters[chapterId]) throw new Error('生成的章节 ID 已存在');
@@ -1104,6 +1419,12 @@ export function createFictionistRepository(
         const updated = cloneIndex(index);
         updated.chapters[chapterId] = chapter;
         updated.volumes[volumeId].chapterIds.push(chapterId);
+        if (outlineChapter && outlineVolume) {
+          const updatedOutline = updated.projects[project.id].outline!;
+          updatedOutline.volumes[outlineVolume.id].linkedVolumeId = volumeId;
+          updatedOutline.chapters[outlineChapter.id].linkedChapterId = chapterId;
+          updatedOutline.updatedAt = timestamp;
+        }
         updated.projects[project.id].updatedAt = timestamp;
         updated.activeProjectId = project.id;
         updated.activeChapterId = chapterId;
@@ -1218,7 +1539,9 @@ export function createFictionistRepository(
         updated.volumes[volume.id].chapterIds = volume.chapterIds.filter((id) => id !== chapterId);
         const outline = updated.projects[chapter.projectId].outline;
         if (outline) {
-          delete outline.chapters[chapterId];
+          for (const outlineChapter of Object.values(outline.chapters)) {
+            if (outlineChapter.linkedChapterId === chapterId) delete outlineChapter.linkedChapterId;
+          }
           outline.updatedAt = timestamp;
         }
         updated.projects[chapter.projectId].updatedAt = timestamp;
@@ -1378,6 +1701,29 @@ export function createFictionistRepository(
         )) return index;
         const chapter = index.chapters[input.chapterId];
         if (!chapter) throw new Error('目标章节不存在');
+        const outline = index.projects[chapter.projectId]?.outline;
+        const outlineChapterId = input.outlineChapterId;
+        const outlineChapter = outlineChapterId
+          ? outline?.chapters[outlineChapterId]
+          : undefined;
+        const outlineVolume = outlineChapterId && outline
+          ? Object.values(outline.volumes).find(
+              (item) => item.chapterIds.includes(outlineChapterId),
+            )
+          : undefined;
+        if (outlineChapterId && (!outlineChapter || !outlineVolume)) {
+          throw new Error('关联的章纲不存在');
+        }
+        if (outlineChapter?.linkedChapterId && outlineChapter.linkedChapterId !== chapter.id) {
+          throw new Error('章纲已经关联其他正文章节');
+        }
+        if (outlineVolume?.linkedVolumeId && outlineVolume.linkedVolumeId !== chapter.volumeId) {
+          throw new Error('章纲所属卷纲已关联其他正文卷');
+        }
+        const duplicateLink = outline && Object.values(outline.chapters).find(
+          (item) => item.id !== outlineChapter?.id && item.linkedChapterId === chapter.id,
+        );
+        if (duplicateLink) throw new Error('正文章节已经关联其他章纲');
         const title = normalizeText(input.title, 80, '章节名称');
         assertChapterContentSize(input.content);
         const timestamp = now();
@@ -1391,6 +1737,12 @@ export function createFictionistRepository(
           sourceTaskId: input.sourceTaskId,
           updatedAt: timestamp,
         };
+        if (outlineChapter && outlineVolume) {
+          const updatedOutline = updated.projects[chapter.projectId].outline!;
+          updatedOutline.volumes[outlineVolume.id].linkedVolumeId = chapter.volumeId;
+          updatedOutline.chapters[outlineChapter.id].linkedChapterId = chapter.id;
+          updatedOutline.updatedAt = timestamp;
+        }
         updated.projects[chapter.projectId].updatedAt = timestamp;
         updated.activeProjectId = chapter.projectId;
         updated.activeChapterId = chapter.id;

@@ -1,13 +1,23 @@
-import { BulbOutlined, FileTextOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
-import { Button, Input, Tag } from 'antd';
+import { useState } from 'react';
+import {
+  BulbOutlined,
+  DisconnectOutlined,
+  ExportOutlined,
+  FileAddOutlined,
+  FileTextOutlined,
+  LinkOutlined,
+  SaveOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
+import { Button, Dropdown, Input, Segmented, Tag } from 'antd';
 import {
   MAX_OUTLINE_FIELD_CHARS,
   MAX_OUTLINE_DETAILS_CHARS,
-  type FictionChapter,
   type FictionChapterOutline,
+  type FictionOutlineChapter,
+  type FictionOutlineVolume,
   type FictionProjectOutline,
   type FictionStoryOutline,
-  type FictionVolume,
   type FictionVolumeOutline,
 } from '../../features/fictionist/domain';
 
@@ -24,8 +34,8 @@ interface OutlineEditorProps {
   projectTitle: string;
   target: FictionOutlineTarget;
   outline: FictionProjectOutline;
-  volume?: FictionVolume;
-  chapter?: FictionChapter;
+  volume?: FictionOutlineVolume;
+  chapter?: FictionOutlineChapter;
   chapterNumber?: number;
   dirty: boolean;
   saving: boolean;
@@ -37,6 +47,12 @@ interface OutlineEditorProps {
   onOptimize: () => void;
   hasPendingReview?: boolean;
   onOpenPendingReview?: () => void;
+  pendingReviews?: Array<{ id: string; label: string; onOpen: () => void }>;
+  linkedChapterTitle?: string;
+  onCreateManuscriptChapter?: () => void;
+  onLinkManuscriptChapter?: () => void;
+  onOpenManuscriptChapter?: () => void;
+  onUnlinkManuscriptChapter?: () => void;
 }
 
 const STORY_FIELDS: Array<{
@@ -124,12 +140,19 @@ export default function OutlineEditor({
   onOptimize,
   hasPendingReview = false,
   onOpenPendingReview,
+  pendingReviews = [],
+  linkedChapterTitle,
+  onCreateManuscriptChapter,
+  onLinkManuscriptChapter,
+  onOpenManuscriptChapter,
+  onUnlinkManuscriptChapter,
 }: OutlineEditorProps) {
+  const [pane, setPane] = useState<'structured' | 'details'>('structured');
   const isStory = target.kind === 'story';
   const isVolume = target.kind === 'volume' && volume;
   const isChapter = target.kind === 'chapter' && chapter;
-  const volumeOutline = isVolume ? outline.volumes[volume.id] : undefined;
-  const chapterOutline = isChapter ? outline.chapters[chapter.id] : undefined;
+  const volumeOutline = isVolume ? volume : undefined;
+  const chapterOutline = isChapter ? chapter : undefined;
   const fields = isStory ? STORY_FIELDS : isVolume ? VOLUME_FIELDS : CHAPTER_FIELDS;
   const values = isStory
     ? outline
@@ -171,7 +194,19 @@ export default function OutlineEditor({
         </span>
         <div className="fictionist-outline-actions">
           <Tag color={dirty ? 'gold' : 'green'}>{dirty ? '有未保存修改' : '已保存'}</Tag>
-          {hasPendingReview ? (
+          {pendingReviews.length > 1 ? (
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: pendingReviews.map((review) => ({ key: review.id, label: review.label })),
+                onClick: ({ key }) => pendingReviews.find((review) => review.id === key)?.onOpen(),
+              }}
+            >
+              <Button icon={<FileTextOutlined />}>待确认结果 {pendingReviews.length}</Button>
+            </Dropdown>
+          ) : pendingReviews.length === 1 ? (
+            <Button icon={<FileTextOutlined />} onClick={pendingReviews[0].onOpen}>待确认结果</Button>
+          ) : hasPendingReview ? (
             <Button icon={<FileTextOutlined />} onClick={onOpenPendingReview}>待确认结果</Button>
           ) : null}
           <Button icon={<UploadOutlined />} onClick={onImport}>导入大纲</Button>
@@ -189,12 +224,45 @@ export default function OutlineEditor({
       </header>
 
       <div className="fictionist-outline-progress" aria-label="大纲填写进度">
-        <span><strong>{completedCount}</strong><small>已填写</small></span>
-        <span><strong>{fields.length}</strong><small>当前项目</small></span>
+        <span><strong>已完成 {completedCount}/{fields.length} 项</strong><small>当前大纲完整度</small></span>
         <span><strong>{outline.updatedAt ? '已建立' : '未建立'}</strong><small>正式大纲</small></span>
+        {isChapter ? (
+          <span className="fictionist-outline-link-status">
+            <strong>{chapter.linkedChapterId ? '已关联正文' : '未关联正文'}</strong>
+            <small>{linkedChapterTitle ?? '章纲可先独立规划'}</small>
+          </span>
+        ) : null}
       </div>
 
-      <div className="fictionist-outline-workspace">
+      {isChapter ? (
+        <div className="fictionist-outline-manuscript-actions">
+          {chapter.linkedChapterId ? (
+            <>
+              <Button icon={<ExportOutlined />} onClick={onOpenManuscriptChapter}>打开正文章节</Button>
+              <Button icon={<DisconnectOutlined />} onClick={onUnlinkManuscriptChapter}>解除关联</Button>
+            </>
+          ) : (
+            <>
+              <Button type="primary" icon={<FileAddOutlined />} onClick={onCreateManuscriptChapter}>
+                从章纲创建章节
+              </Button>
+              <Button icon={<LinkOutlined />} onClick={onLinkManuscriptChapter}>关联已有章节</Button>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      <Segmented
+        className="fictionist-outline-pane-switch"
+        value={pane}
+        onChange={(value) => setPane(value as 'structured' | 'details')}
+        options={[
+          { label: '结构化大纲', value: 'structured' },
+          { label: '详细大纲', value: 'details' },
+        ]}
+      />
+
+      <div className="fictionist-outline-workspace" data-pane={pane}>
         <section className="fictionist-outline-section fictionist-outline-structured">
           <div className="fictionist-outline-section-heading">
             <span>

@@ -36,7 +36,12 @@ const theme = {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ConfigProvider locale={zhCN} theme={theme}>
-      <AntApp>
+      <AntApp
+        message={{
+          top: '50%',
+          styles: { listContent: { transform: 'translateY(-50%)' } },
+        }}
+      >
         <AppBridge />
         <ErrorBoundary>
           <App />

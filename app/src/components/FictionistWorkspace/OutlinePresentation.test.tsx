@@ -32,6 +32,52 @@ describe('fictionist outline presentation', () => {
     expect(html).toContain('fictionist-outline-details');
     expect(html).toContain('aria-label="详细大纲"');
     expect(html).toContain('第一幕：记者抵达雾港。');
+    expect(html).toContain('已完成 2/6 项');
+    expect(html).toContain('结构化大纲');
+    expect(html).toContain('详细大纲');
+  });
+
+  it('shows explicit manuscript actions for an independent chapter outline', () => {
+    const outline = createEmptyFictionProjectOutline();
+    outline.volumeIds = ['outline-volume-1'];
+    outline.volumes['outline-volume-1'] = {
+      id: 'outline-volume-1', title: '第一卷纲', chapterIds: ['outline-chapter-1'],
+      summary: '', objective: '', turningPoint: '', climax: '', details: '',
+    };
+    outline.chapters['outline-chapter-1'] = {
+      id: 'outline-chapter-1', title: '雨夜来信',
+      summary: '', objective: '', pointOfView: '', conflict: '', keyEvents: '', clues: '', hook: '', details: '',
+    };
+    const html = renderToStaticMarkup(
+      <OutlineEditor
+        projectTitle="雾港来信"
+        target={{ kind: 'chapter', id: 'outline-chapter-1' }}
+        outline={outline}
+        volume={outline.volumes['outline-volume-1']}
+        chapter={outline.chapters['outline-chapter-1']}
+        chapterNumber={1}
+        dirty={false}
+        saving={false}
+        onStoryChange={vi.fn()}
+        onVolumeChange={vi.fn()}
+        onChapterChange={vi.fn()}
+        onSave={vi.fn()}
+        onImport={vi.fn()}
+        onOptimize={vi.fn()}
+        onCreateManuscriptChapter={vi.fn()}
+        onLinkManuscriptChapter={vi.fn()}
+        pendingReviews={[
+          { id: 'task-1', label: '大纲优化 · 10:30', onOpen: vi.fn() },
+          { id: 'task-2', label: '导入整理 · 09:20', onOpen: vi.fn() },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('未关联正文');
+    expect(html).toContain('从章纲创建章节');
+    expect(html).toContain('关联已有章节');
+    expect(html).toContain('已完成 0/8 项');
+    expect(html).toContain('待确认结果 2');
   });
 
   it('renders analyzed results as named Chinese sections without JSON or internal ids', () => {
@@ -46,6 +92,8 @@ describe('fictionist outline presentation', () => {
       },
       volumes: [{
         id: 'volume-private-id',
+        title: '第一卷 · 潮汐失语',
+        isNew: true,
         summary: '查明来信来源',
         objective: '建立谜团',
         turningPoint: '预言第一次应验',
@@ -54,6 +102,9 @@ describe('fictionist outline presentation', () => {
       }],
       chapters: [{
         id: 'chapter-private-id',
+        volumeId: 'volume-private-id',
+        title: '第一章 · 七号泊位',
+        isNew: true,
         summary: '记者收到来信',
         objective: '引出核心谜团',
         pointOfView: '林砚',
@@ -77,6 +128,7 @@ describe('fictionist outline presentation', () => {
     expect(html).toContain('故事总纲');
     expect(html).toContain('第一卷 · 潮汐失语');
     expect(html).toContain('第一章 · 七号泊位');
+    expect(html).toContain('新增');
     expect(html).toContain('一句话梗概');
     expect(html).toContain('详细大纲');
     expect(html).not.toContain('<pre');
